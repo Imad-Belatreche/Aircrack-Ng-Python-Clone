@@ -44,15 +44,6 @@ def run_command(command, check=False):
         return "", f"{Fore.RED}Command not found: {command.split()[0]}{Fore.RESET}"
 
 
-def save_procs(procs):
-    try:
-        file = open(".bak_proc", "+x")
-        file.write(procs)
-        file.close()
-    except FileExistsError:
-        print(f"{Fore.RED}File already exists !{Fore.RESET}")
-
-
 def check_root():
     """Basically checks if the script did run as a root"""
     if os.getuid() != 0:
@@ -60,8 +51,36 @@ def check_root():
         sys.exit(1)
 
 
-        
-    
+def save_procs(procs: list):
+    """Saves killed processes to .bak_proc file"""
+    try:
+        file = open(".bak_proc", "+x")
+        for p in procs:
+            file.write(
+                f"{p}\n",
+            )
+        file.close()
+    except FileExistsError:
+        print(f"{Fore.RED}File already exists !{Fore.RESET}")
+
+
+def enable_processes():
+    """Re-enables killed processes"""
+    try:
+        file = open(".bak_proc", "+r")
+        procs = file.readlines()
+        for p in procs:
+            proc_name = p.strip()
+            if proc_name:
+                print(f"Enabling {proc_name}...")
+                subprocess.run(["sudo", "systemctl", "start", proc_name])
+
+        file.close()
+        subprocess.run(["rm", ".bak_proc"])
+
+    except FileNotFoundError:
+        print(f"{Fore.RED}File doesn't exist !{Fore.RESET}")
+
 
 def scan_processes(kill=False):
     """Scans and optionally kills interfering processes automatically"""
@@ -99,17 +118,17 @@ def scan_processes(kill=False):
 
     if not kill:
         print(
-            f"{Fore.GREEN}Aight, don't forget to kill them using 'hit-mon proc kill'{Fore.RESET}"
+            f"{Fore.GREEN}Don't forget to kill them using 'hit-mon proc kill'{Fore.RESET}"
         )
         return
 
     check_root()
     print("\nKilling these processes ...")
     bak_ps = []
-    for pid, name in found_pids.items:
+    for pid, name in found_pids.items():
         try:
             bak_ps.append(name)
-            os.kill(pid, signal.SIGKILL)
+            subprocess.run(["systemctl", "stop", name])
             print(f"Killed PID {pid}")
         except OSError as e:
             print(f"{Fore.RED}Failed to kill PID {pid}: {e}{Fore.RESET}")
@@ -121,7 +140,7 @@ def scan_processes(kill=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="Hitmon",
+        prog="hitmon",
         description="Enables monitor mode on wireless interfaces, kill network managers or to go from monitor to managed mode",
         epilog="By NS-Guys",
     )
@@ -129,8 +148,9 @@ def main():
 
     # proc argument
     proc_parser = subparser.add_parser(name="proc", help="Show interfering proccesses")
-    proc_parser.add_argument("kill", nargs="?", help="Kill interfering proccesses")
-    proc_parser.add_argument("enable", nargs="?", help="Enable interfering proccesses")
+    proc_subparsers = proc_parser.add_subparsers(dest="action", help="Available actions")
+    proc_subparsers.add_parser("kill", help="Kill interfering processes")
+    proc_subparsers.add_parser("enable", help="Enable interfering processes")
 
     # start argument
     start_parser = subparser.add_parser(
@@ -151,14 +171,14 @@ def main():
         sys.exit(0)
 
     if args.command == "proc":
-        if args.kill == "kill":
+        if args.action == "kill":
             scan_processes(kill=True)
-        elif args.enable == "enable":
-            
-        elif args.kill is None or args.enable is None:
-            scan_processes(kill=False)
+        elif args.action == "enable":
+            enable_processes()
         else:
-            proc_parser.print_help()
+            scan_processes(kill=False)
+
+        return
 
 
 if __name__ == "__main__":
