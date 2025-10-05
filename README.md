@@ -5,11 +5,21 @@ A simple yet effective clone of the known wireless network security tool Aircrac
 ## Main tools
 
 ### Hitmon
+
 Enables monitor mode on wireless interfaces, kill network managers or to go from monitor to managed mode
 
-```
+```fish
 sudo python src/tools/hitmon.py
 usage: hitmon [-h] {proc,start,stop} ...
+
+ /$$       /$$   /$$                                      
+| $$      |__/  | $$                                      
+| $$$$$$$  /$$ /$$$$$$   /$$$$$$/$$$$   /$$$$$$  /$$$$$$$ 
+| $$__  $$| $$|_  $$_/  | $$_  $$_  $$ /$$__  $$| $$__  $$
+| $$  \ $$| $$  | $$    | $$ \ $$ \ $$| $$  \ $$| $$  \ $$
+| $$  | $$| $$  | $$ /$$| $$ | $$ | $$| $$  | $$| $$  | $$
+| $$  | $$| $$  |  $$$$/| $$ | $$ | $$|  $$$$$$/| $$  | $$
+|__/  |__/|__/   \___/  |__/ |__/ |__/ \______/ |__/  |__/
 
 Enables monitor mode on wireless interfaces, kill network managers or to go from monitor to managed mode
 
@@ -22,10 +32,11 @@ positional arguments:
 options:
   -h, --help         show this help message and exit
 
-By NS-Guys
+@By NS-Guys
 ```
 
 ## Used libraries
 
 - For parsing command arguments: **argparse**
 - For excuting system commands: **subprocess** and **os**
+
