@@ -1,6 +1,5 @@
 import argparse
 import sys
-import time
 from scapy.layers.dot11 import RadioTap, Dot11, Dot11Deauth
 from scapy.layers.l2 import ARP
 from scapy.all import sendp, sr1
