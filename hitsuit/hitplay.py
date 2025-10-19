@@ -7,6 +7,11 @@ from scapy.all import sendp, sr1
 
 from helpers import check_root
 
+# TODO: Auto-completions
+# TODO: Add documentation + Usage + Logo
+# TODO: Add arguments checking
+# TODO: Needs deep testing
+
 
 def get_mac_address(ip_address):
     """
