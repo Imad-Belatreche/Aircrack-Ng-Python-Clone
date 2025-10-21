@@ -1,11 +1,17 @@
+#!/usr/bin/env python3
+
 import argparse
 import os
 import subprocess
 import sys
 
-from colorama import Fore
+import argcomplete
+from argcomplete.completers import ChoicesCompleter
+from helpers import add_interface_argument
 
-from helpers import check_root, run_command
+if "_ARGCOMPLETE" not in os.environ:
+    from colorama import Fore
+    from helpers import check_root, run_command
 
 # All processes that may interfer with the monitor mode (Directly from airmon-ng code)
 INTERFERING_PROCESSES = [
@@ -34,16 +40,15 @@ INTERFERING_PROCESSES = [
 
 # TODO: Needs a deep test on multiple machines and on vm and on external
 # TODO: Make the tool also work for windows
-# TODO: The termminal autocompletions
 
 
-def get_phy(interface):
+def _get_phy(interface):
     """Get's physical address of given interface (needed for iw command)"""
     stdout, _ = run_command(f"cat /sys/class/net/{interface}/phy80211/name")
     return stdout
 
 
-def save_procs(procs: list):
+def _save_procs(procs: list):
     """Saves killed processes to .bak_proc file"""
     try:
         with open(".bak_proc", "+a") as file:
@@ -58,7 +63,7 @@ def save_procs(procs: list):
         print(f"{Fore.RED}Error saving processes: {e}{Fore.RESET}")
 
 
-def check_socket(proc):
+def _check_socket(proc):
     """Check if the process have triggering units"""
     out, _ = run_command(f"systemctl status {proc}.socket")
     if out:
@@ -67,7 +72,7 @@ def check_socket(proc):
         return False
 
 
-def enable_processes():
+def _enable_processes():
     """Re-enables killed processes"""
     try:
         with open(
@@ -81,7 +86,7 @@ def enable_processes():
                     print(f"Enabling {proc_name}...")
                     run_command(f"systemctl start {proc_name}")
 
-                    if check_socket(proc_name):
+                    if _check_socket(proc_name):
                         run_command(f"systemctl start {proc_name}.socket")
 
         os.remove(".bak_proc")
@@ -90,7 +95,7 @@ def enable_processes():
         print(f"{Fore.RED}File doesn't exist !{Fore.RESET}")
 
 
-def scan_processes(kill=False):
+def _scan_processes(kill=False):
     """Scans and optionally kills interfering processes with their triggering units automatically"""
 
     print("Scanning for interfering processes...")
@@ -134,7 +139,7 @@ def scan_processes(kill=False):
     for pid, name in found_pids.items():
         try:
             bak_ps.append(name)
-            if check_socket(name):
+            if _check_socket(name):
                 subprocess.run(
                     ["systemctl", "stop", f"{name}.socket"],
                 )
@@ -143,19 +148,19 @@ def scan_processes(kill=False):
         except OSError as e:
             print(f"{Fore.RED}Failed to kill process {name} - {pid}: {e}{Fore.RESET}")
 
-    save_procs(bak_ps)
+    _save_procs(bak_ps)
 
     print(f"{Fore.GREEN}\nProcesses killed.{Fore.RESET}")
     return 0
 
 
-def start_mon(interface: str, channel: int = None):
+def _start_mon(interface: str, channel: int = None):
     """Starts monitor mode on a given channel"""
-    op = scan_processes(kill=True)
+    op = _scan_processes(kill=True)
     if op == 2 or op == 1:
         return
 
-    phy = get_phy(interface)
+    phy = _get_phy(interface)
     if not phy:
         print(f"{Fore.RED}Could not determine phy for {interface}{Fore.RESET}")
         return
@@ -195,9 +200,9 @@ def start_mon(interface: str, channel: int = None):
     print(f"{Fore.GREEN}Monitor mode enabled on {mon_interface} !{Fore.RESET}")
 
 
-def stop_mon(interface: str):
+def _stop_mon(interface: str):
     """This will stop monitor mode, go back to managed mode and re-enable killed processes"""
-    phy = get_phy(interface)
+    phy = _get_phy(interface)
 
     if not phy:
         print(f"{Fore.RED}Couldn't determine phy for {interface}{Fore.RESET}")
@@ -225,14 +230,13 @@ def stop_mon(interface: str):
             return
         run_command(f"ip link set {interface} up")
 
-    enable_processes()
+    _enable_processes()
 
     print(f"{Fore.GREEN}Monitor mode stopped !{Fore.RESET}")
 
 
 def main():
     """Main function"""
-    check_root()
     art = r"""
  /$$       /$$   /$$                                      
 | $$      |__/  | $$                                      
@@ -251,57 +255,69 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparser = parser.add_subparsers(dest="command", help="")
+    subparser.required = True
+    commands = [
+        ("proc", "Show interfering proccesses"),
+        ("start", "Enable monitor mode on given interface"),
+        ("stop", "Stop monitor mode and back to managed mode"),
+    ]
+    for name, help in commands:
+        # proc argument
+        command_parser = subparser.add_parser(name=name, help=help, description=help)
+        if name == "proc":
+            proc_subparsers = command_parser.add_subparsers(
+                dest="action", help="Available actions"
+            )
+            proc_subparsers.required = False
+            proc_action = [
+                ("kill", "Kill interfering processes"),
+                ("enable", "Enable interfering processes"),
+            ]
+            for name, help in proc_action:
+                proc_subparsers.add_parser(name=name, help=help, description=help)
 
-    # proc argument
-    proc_parser = subparser.add_parser(name="proc", help="Show interfering proccesses")
-    proc_subparsers = proc_parser.add_subparsers(
-        dest="action", help="Available actions"
-    )
-    proc_subparsers.add_parser("kill", help="Kill interfering processes")
-    proc_subparsers.add_parser("enable", help="Enable interfering processes")
+        if name == "start":
+            # start argument
+            add_interface_argument(command_parser)
+            command_parser.add_argument(
+                "channel", nargs="?", help="Optional channel to set the nic"
+            )
+        if name == "stop":
+            # stop argument
+            add_interface_argument(command_parser)
 
-    # start argument
-    start_parser = subparser.add_parser(
-        name="start", help="Enable monitor mode on given interface"
-    )
-    start_parser.add_argument("interface", help="Wireless interface")
-    start_parser.add_argument(
-        "channel", nargs="?", help="Optional channel to set the nic"
-    )
-
-    # stop argument
-    stop_parser = subparser.add_parser(name="stop", help="Go back to managed mode")
-    stop_parser.add_argument("interface", help="Wireless interface in monitor mode")
+    argcomplete.autocomplete(parser)
 
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
         sys.exit(0)
 
+    check_root()
     if args.command == "proc":
         if args.action == "kill":
-            scan_processes(kill=True)
+            _scan_processes(kill=True)
         elif args.action == "enable":
-            enable_processes()
+            _enable_processes()
         else:
-            scan_processes(kill=False)
+            _scan_processes(kill=False)
 
         return
     elif args.command == "start":
         if args.channel:
             chan = int(args.channel)
             if chan <= 14 and chan > 0:
-                start_mon(interface=args.interface, channel=args.channel)
+                _start_mon(interface=args.interface, channel=args.channel)
             else:
                 print(
                     f"{Fore.RED}You have entered an invalid channel value, it must be between 1-14{Fore.RESET}"
                 )
                 sys.exit(1)
         else:
-            start_mon(interface=args.interface)
+            _start_mon(interface=args.interface)
 
     elif args.command == "stop":
-        stop_mon(interface=args.interface)
+        _stop_mon(interface=args.interface)
 
 
 if __name__ == "__main__":
