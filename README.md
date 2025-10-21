@@ -40,7 +40,7 @@ options:
 Used to inject and replay wireless frames. Right now, it only performs [**Deauthentication attack**](https://en.wikipedia.org/wiki/Wi-Fi_deauthentication_attack)
 
 ```fish
-hitplay
+hitplay -h
 usage: hitplay [-h] attack-mode ...
 
  /$$       /$$   /$$               /$$                    
@@ -76,7 +76,25 @@ options:
 @By NS-Guys
 ```
 
-## Used libraries
+## Instalation
+
+Simple and easy, the installation script will do everything needed:
+
+```bash
+sudo chmod +x ./install.sh
+sudo ./install.sh
+```
+
+## Uninstalling
+
+There is also a script for uninstallation:
+
+```bash
+sudo chmod +x ./uninstall.sh
+sudo ./uninstall.sh
+```
+
+## Used Python libraries
 
 - For parsing command arguments: **argparse**
 - For terminal tab autocompletion: **argcomplete**
