@@ -36,8 +36,6 @@ INTERFERING_PROCESSES = [
     "hostapd",
 ]
 
-# [x] First i will make the rool only work for linux
-
 # TODO: Needs a deep test on multiple machines and on vm and on external
 # TODO: Make the tool also work for windows
 

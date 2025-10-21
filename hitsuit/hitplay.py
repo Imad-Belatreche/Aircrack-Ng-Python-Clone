@@ -15,9 +15,7 @@ if "_ARGCOMPLETE" not in os.environ:
     from scapy.all import sendp
     from helpers import check_root, run_command
 
-# TODO: Auto-completions
-# TODO: Add documentation + Usage + Logo
-# TODO: Add arguments checking
+# TODO: Make it run on windows
 # TODO: Needs deep testing
 
 # Still didn't decide what other tools to add beside deauth
