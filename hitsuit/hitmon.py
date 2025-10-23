@@ -340,6 +340,10 @@ def main():
             _start_mon(interface=args.interface)
 
     elif args.command == "stop":
+        is_monitor, _ = check_monitor(args.interface)
+        if not is_monitor:
+            print(f"{Fore.RED}Interface is not in monitor mode!")
+            sys.exit(0)
         _stop_mon(interface=args.interface)
 
 
