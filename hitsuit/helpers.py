@@ -22,10 +22,9 @@ def _get_mac_address(ip_address):
 
 
 # Adds autocompletion of interfaces
-
-
 def interface_completer(prefix, **kwargs):
     """Gets all avilable interfaces."""
+
     try:
         return (i for i in os.listdir("/sys/class/net/") if i.startswith(prefix))
     except FileNotFoundError:
@@ -34,6 +33,7 @@ def interface_completer(prefix, **kwargs):
 
 def add_interface_argument(subparser):
     """Adds the autocompletion"""
+
     interface_arg = subparser.add_argument(
         "interface",
         help="The network interface to use.",
@@ -44,6 +44,7 @@ def add_interface_argument(subparser):
 
 def run_command(command, check=False):
     """Runs a command and return it's output (stdout and stderr)"""
+
     try:
         result = subprocess.run(
             command, shell=True, capture_output=True, text=True, check=check
@@ -57,6 +58,7 @@ def run_command(command, check=False):
 
 def check_root():
     """Basically checks if the script did run as a root"""
+
     if os.getuid() != 0:
         print(f"{Fore.RED}Run it as root !{Fore.RESET}")
         sys.exit(1)
@@ -64,6 +66,7 @@ def check_root():
 
 def check_mac(mac):
     """Validate if the input is a correct mac address or not"""
+
     result = re.fullmatch(r"([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", mac)
     if result:
         return
@@ -74,6 +77,7 @@ def check_mac(mac):
 
 def check_interface(interface):
     """Checks if interface exists"""
+
     interfaces = os.listdir("/sys/class/net")
     if interface in interfaces:
         return
@@ -83,3 +87,25 @@ def check_interface(interface):
         for inter in interfaces:
             print(f"- {inter}")
         sys.exit(1)
+
+
+def check_monitor(interface):
+    """Checks if monitor mode is enabled"""
+
+    out, err = run_command(f"iw dev {interface} info")
+    if err:
+        print(f"{Fore.RED}An error occured: {err}")
+        return False
+
+    wireless_types = ["ibss", "monitor", "mesh", "wds", "managed"]
+
+    for type in wireless_types:
+        search = re.search(type, out)
+        if search is not None:
+            break
+    result = search.group(0)
+
+    if result == "monitor":
+        return True, None
+    else:
+        return False, result
