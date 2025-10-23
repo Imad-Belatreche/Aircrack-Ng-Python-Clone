@@ -3,16 +3,17 @@
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import argcomplete
 
 from pathlib import Path
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
-    
-from helpers import add_interface_argument
+from helpers import add_interface_argument, check_monitor
 
 if "_ARGCOMPLETE" not in os.environ:
     from colorama import Fore
@@ -159,6 +160,19 @@ def _scan_processes(kill=False):
 
 def _start_mon(interface: str, channel: int = None):
     """Starts monitor mode on a given channel"""
+
+    interfaces = os.listdir("/sys/class/net")
+
+    for inter in interfaces:
+        result = re.match(interface + "mon", inter)
+        if result:
+            print(
+                f"{Fore.RED}Interface already in monitor mode ({interface}mon) !{Fore.RESET}"
+            )
+            sys.exit(1)
+        else:
+            continue
+
     op = _scan_processes(kill=True)
     if op == 2 or op == 1:
         return
@@ -297,6 +311,7 @@ def main():
         sys.exit(0)
 
     check_root()
+
     if args.command == "proc":
         if args.action == "kill":
             _scan_processes(kill=True)
@@ -307,6 +322,11 @@ def main():
 
         return
     elif args.command == "start":
+        is_monitor, _ = check_monitor(args.interface)
+        if is_monitor:
+            print(f"{Fore.RED}Interface already in monitor mode !")
+            sys.exit(0)
+
         if args.channel:
             chan = int(args.channel)
             if chan <= 14 and chan > 0:
