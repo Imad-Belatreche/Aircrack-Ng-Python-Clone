@@ -1,0 +1,4 @@
+argparse
+argcomplete
+colorama
+scapy
