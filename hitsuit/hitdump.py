@@ -35,71 +35,71 @@ if "_ARGCOMPLETE" not in os.environ:
 
     init(autoreset=True)
 
-# Global data structures
-access_points = {}  # BSSID -> AP info
-clients = {}  # Client MAC -> client info
+# GLOBAL DATA STRUCTURES
+access_points = {}
+clients = {}
 ap_lock = threading.Lock()
 client_lock = threading.Lock()
 packet_count = 0
 start_time = None
-captured_packets = []  # Store packets for PCAP writing
+captured_packets = []
 
 # RSN (WPA2/WPA3) Cipher Suite mappings (IEEE 802.11-2016)
 RSN_CIPHER_MAP = {
-    0: "GROUP",      # Use group cipher suite
-    1: "WEP-40",     # WEP-40
-    2: "TKIP",       # TKIP
-    3: "RESERVED",   # Reserved
-    4: "CCMP",       # CCMP-128 (AES)
-    5: "WEP-104",    # WEP-104
-    6: "BIP-CMAC",   # BIP-CMAC-128
-    7: "GROUP-NA",   # Group addressed traffic not allowed
-    8: "GCMP",       # GCMP-128
-    9: "GCMP-256",   # GCMP-256
-    10: "CCMP-256",  # CCMP-256
-    11: "BIP-GMAC-128",  # BIP-GMAC-128
-    12: "BIP-GMAC-256",  # BIP-GMAC-256
-    13: "BIP-CMAC-256",  # BIP-CMAC-256
+    0: "GROUP",
+    1: "WEP-40",
+    2: "TKIP",
+    3: "RESERVED",
+    4: "CCMP",
+    5: "WEP-104",
+    6: "BIP-CMAC",
+    7: "GROUP-NA",
+    8: "GCMP",
+    9: "GCMP-256",
+    10: "CCMP-256",
+    11: "BIP-GMAC-128",
+    12: "BIP-GMAC-256",
+    13: "BIP-CMAC-256",
 }
 
 # RSN Authentication and Key Management (AKM) Suite mappings
 RSN_AUTH_MAP = {
-    0: "RESERVED",   # Reserved
-    1: "MGT",        # IEEE 802.1X / EAP (Enterprise)
-    2: "PSK",        # PSK (Pre-Shared Key)
-    3: "FT-MGT",     # FT over IEEE 802.1X
-    4: "FT-PSK",     # FT using PSK
-    5: "MGT-SHA256", # IEEE 802.1X SHA-256
-    6: "PSK-SHA256", # PSK SHA-256
-    7: "TDLS",       # TDLS / TPK Handshake
-    8: "SAE",        # SAE (WPA3-Personal)
-    9: "FT-SAE",     # FT using SAE
-    10: "AP-PEER",   # AP Peer Key
-    11: "MGT-SUITE-B",     # Suite B
-    12: "MGT-SUITE-B-192", # Suite B 192-bit
-    13: "FT-MGT-SHA384",   # FT over 802.1X SHA-384
-    14: "FILS-SHA256",     # FILS SHA-256
-    15: "FILS-SHA384",     # FILS SHA-384
-    16: "FT-FILS-SHA256",  # FT FILS SHA-256
-    17: "FT-FILS-SHA384",  # FT FILS SHA-384
-    18: "OWE",       # OWE (Opportunistic Wireless Encryption)
+    0: "RESERVED",
+    1: "MGT",
+    2: "PSK",
+    3: "FT-MGT",
+    4: "FT-PSK",
+    5: "MGT-SHA256",
+    6: "PSK-SHA256",
+    7: "TDLS",
+    8: "SAE",
+    9: "FT-SAE",
+    10: "AP-PEER",
+    11: "MGT-SUITE-B",
+    12: "MGT-SUITE-B-192",
+    13: "FT-MGT-SHA384",
+    14: "FILS-SHA256",
+    15: "FILS-SHA384",
+    16: "FT-FILS-SHA256",
+    17: "FT-FILS-SHA384",
+    18: "OWE",
 }
 
-# WPA (WPA1) Cipher Suite mappings - similar to RSN but uses different OUI
+# WPA (WPA1) Cipher Suite mappings
 WPA_CIPHER_MAP = {
-    0: "GROUP",      # Use group cipher suite
-    1: "WEP-40",     # WEP-40
-    2: "TKIP",       # TKIP
-    3: "RESERVED",   # Reserved
-    4: "CCMP",       # CCMP (rarely used in WPA1)
-    5: "WEP-104",    # WEP-104
+    0: "GROUP",
+    1: "WEP-40",
+    2: "TKIP",
+    3: "RESERVED",
+    4: "CCMP",
+    5: "WEP-104",
 }
 
 # WPA (WPA1) Authentication Suite mappings
 WPA_AUTH_MAP = {
-    0: "RESERVED",   # Reserved
-    1: "MGT",        # IEEE 802.1X / EAP
-    2: "PSK",        # PSK (Pre-Shared Key)
+    0: "RESERVED",
+    1: "MGT",
+    2: "PSK",
 }
 
 class AccessPoint:
@@ -143,7 +143,7 @@ class Client:
         self.packets = 0
         self.first_seen = datetime.now()
         self.last_seen = datetime.now()
-        self.probes = set()  # Set of probed ESSIDs
+        self.probes = set()
 
     def update(self, bssid=None, power=None, probe=None):
         """Update client information"""
@@ -167,86 +167,87 @@ def get_crypto_info(packet):
     Returns: (crypto_type, cipher, auth) tuple
     """
     try:
-        # --- Default values ---
         crypto = "OPN"
         cipher = ""
         auth = ""
 
-        # --- 1. Check for basic WEP (Privacy bit) ---
         cap = packet.sprintf("%Dot11Beacon.cap%")
         if "privacy" in cap.lower():
-            crypto = "WEP"
-            cipher = "WEP" # WEP is both
-            auth = "OPN"   # or "SKA" but we can't easily tell from here
+            pass
 
-        # --- 2. Check for RSN (WPA2/WPA3) ---
-        # Scapy auto-parses ID 48 into this layer
         rsn = packet.getlayer(Dot11EltRSN)
         if rsn:
-            # We found an RSN element, so it's at least WPA2
             crypto = "WPA2"
-            
-            # Parse Pairwise Cipher (the one used for clients)
-            # It's a list, but we usually just care about the first one
             if rsn.pairwise_cipher_suites:
-                cipher_code = rsn.pairwise_cipher_suites[0].suite
+                
+                ciphers = [suite.cipher for suite in rsn.pairwise_cipher_suites]
+                
+                if 9 in ciphers:
+                    cipher_code = 9
+                elif 10 in ciphers:
+                    cipher_code = 10
+                elif 8 in ciphers:
+                    cipher_code = 8
+                elif 4 in ciphers:
+                    cipher_code = 4
+                else:
+                    cipher_code = rsn.pairwise_cipher_suites[0].cipher
+                
                 cipher = RSN_CIPHER_MAP.get(cipher_code, f"UNDEF({cipher_code})")
 
-            # Parse Authentication (AKM)
             if rsn.akm_suites:
                 auth_code = rsn.akm_suites[0].suite
                 auth = RSN_AUTH_MAP.get(auth_code, f"UNDEF({auth_code})")
             
-            # Check for WPA3 / OWE
             if auth == "SAE":
                 crypto = "WPA3"
             elif auth == "OWE":
                 crypto = "OWE"
-                cipher = "CCMP" # OWE mandates CCMP
+                cipher = "CCMP"
             
-            # WPA3-Enterprise uses GCMP
             if "GCMP" in cipher:
                 crypto = "WPA3"
 
-        # --- 3. Check for WPA1 (Vendor-Specific IE) ---
-        # This is an 'elif' because RSN (WPA2/3) takes precedence
         elif packet.haslayer(Dot11EltVendorSpecific):
-            # We have to find the WPA1 OUI: 00:50:f2:01
             p = packet[Dot11EltVendorSpecific]
             while p:
-                if p.oui == 0x0050f2 and p.info.startswith(b'\x01\x01\x00'): # WPA1 OUI + type 1
+                if p.oui == 0x0050f2 and p.info.startswith(b'\x01\x01\x00'):
                     crypto = "WPA"
                     
-                    # WPA1 is tricky and Scapy doesn't parse it as deeply as RSN.
-                    # We can use your original byte-matching, but it's cleaner.
-                    # Or, we can instantiate the WPA_IE class from the info
                     try:
                         from scapy.layers.dot11 import WPA_IE
-                        wpa_info = WPA_IE(p.info[4:]) # Skip OUI and type
+                        wpa_info = WPA_IE(p.info[4:])
 
-                        cipher_code = wpa_info.pairwise_cipher_suites[0].suite
+                        cipher_code = wpa_info.pairwise_cipher_suites[0].cipher
                         cipher = WPA_CIPHER_MAP.get(cipher_code, f"UNDEF({cipher_code})")
                         
                         auth_code = wpa_info.akm_suites[0].suite
                         auth = WPA_AUTH_MAP.get(auth_code, f"UNDEF({auth_code})")
                         
                     except ImportError:
-                        # Fallback if WPA_IE is not available or fails
-                        # This is similar to your original code
+
                         if b'\x00\x50\xf2\x04' in p.info: cipher = "CCMP"
                         elif b'\x00\x50\xf2\x02' in p.info: cipher = "TKIP"
                         if b'\x00\x50\xf2\x02' in p.info: auth = "PSK"
                         elif b'\x00\x50\xf2\x01' in p.info: auth = "MGT"
                     
-                    break # Found WPA1, no need to check other vendor IEs
+                    break
                 
-                # Move to the next vendor-specific IE, if there are multiple
                 p = p.payload.getlayer(Dot11EltVendorSpecific)
+
+        if crypto == "OPN" and "privacy" in cap.lower():
+            crypto = "WEP"
+            cipher = "WEP"
+            auth = "OPN"
 
         return crypto, cipher, auth
 
     except Exception as e:
 
+        import traceback
+        print(f"\n[ERROR] Failed to parse crypto info: {e}")
+        print(f"Packet: {packet.summary()}")
+        traceback.print_exc()
         return "OPN", "", ""
 
 
