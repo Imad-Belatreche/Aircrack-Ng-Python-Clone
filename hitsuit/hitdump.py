@@ -3,6 +3,8 @@
 
 import argparse
 import os
+import re
+import subprocess
 import sys
 import threading
 import time
@@ -43,6 +45,14 @@ client_lock = threading.Lock()
 packet_count = 0
 start_time = None
 captured_packets = []
+
+hopping_active = False
+hop_thread = None
+
+current_interface = None
+current_channel = None
+output_file = None
+filter_bssid = None
 
 # RSN (WPA2/WPA3) Cipher Suite mappings (IEEE 802.11-2016)
 RSN_CIPHER_MAP = {
@@ -158,6 +168,58 @@ class Client:
         
         if probe and probe != "":
             self.probes.add(probe)
+
+def channel_hopper(interface, channels=None, dwell_time=0.1):
+    """Continuously hop through WiFi channels"""
+    global hopping_active, current_channel
+
+    if channels is None:
+        # get_supported_channels does not take an interface argument
+        channels = get_supported_channels()
+
+    if not channels:
+        print(f"Warning: No valid channels found for {interface}, using defaults")
+        channels = [1, 6, 11]
+    print(f"Channel hopping started on channels: {channels}")
+
+    while hopping_active:
+        for channel in channels:
+            if not hopping_active:
+                break
+            
+            try:
+                stdout,stderr = run_command(f"iw dev {interface} set channel {channel}")
+                if stderr and "command failed" in stderr.lower():
+                    continue
+
+                current_channel = channel
+                time.sleep(dwell_time)
+
+            except Exception as e:
+                pass
+
+    print("Channel hopping stopped")
+
+
+def get_supported_channels():
+    """Parse `iw list` output and return a sorted list of usable channel numbers."""
+    try:
+        output = subprocess.check_output(['iw', 'list'], text=True, stderr=subprocess.DEVNULL)
+    except Exception:
+        return []
+
+    channels = []
+    for line in output.splitlines():
+        line = line.strip()
+        m = re.search(r"\[(\d+)\]", line)
+        if m:
+            if '(disabled)' in line:
+                continue
+            ch = int(m.group(1))
+            channels.append(ch)
+
+    print("Successfully detected channels")
+    return sorted(set(channels))
 
 
 def get_crypto_info(packet):
@@ -526,6 +588,8 @@ def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=N
     """Start packet capture on the specified interface"""
     global start_time, current_interface, current_channel, output_file, filter_bssid
 
+    global hop_thread, hopping_active
+
     current_interface = interface
     current_channel = channel
     output_file = output_file_path
@@ -546,6 +610,13 @@ def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=N
             print(f"Channel set successfully")
     else:
         print(f"Channel: Hopping (scanning all channels)")
+        try:
+            hopping_active = True
+            hop_thread = threading.Thread(target=channel_hopper, args=(interface, None, 0.1), daemon=True)
+            hop_thread.start()
+            print("Channel hopper thread started")
+        except Exception as e:
+            print(f"Failed to start channel hopper: {e}")
 
     if filter_bssid:
         print(f"Filter: BSSID = {filter_bssid}")
@@ -572,6 +643,13 @@ def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=N
     except Exception as e:
         print(f"\nError during capture: {e}")
     finally:
+
+        try:
+            hopping_active = False
+            if hop_thread and hasattr(hop_thread, 'is_alive') and hop_thread.is_alive():
+                hop_thread.join(timeout=1)
+        except Exception:
+            pass
         if output_file and captured_packets:
             print(f"\nWriting {len(captured_packets)} packets to {output_file}...")
             try:
@@ -688,12 +766,6 @@ def main():
         check_mac(args.bssid)
 
     start_sniffer(args.interface, args.channel, args.write, args.bssid)
-
-
-current_interface = None
-current_channel = None
-output_file = None
-filter_bssid = None
 
 
 if __name__ == "__main__":
