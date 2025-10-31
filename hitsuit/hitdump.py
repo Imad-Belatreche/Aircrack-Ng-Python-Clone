@@ -3,6 +3,8 @@
 
 import argparse
 import os
+import re
+import subprocess
 import sys
 import threading
 import time
@@ -43,6 +45,14 @@ client_lock = threading.Lock()
 packet_count = 0
 start_time = None
 captured_packets = []
+
+hopping_active = False
+hop_thread = None
+
+current_interface = None
+current_channel = None
+output_file = None
+filter_bssid = None
 
 # RSN (WPA2/WPA3) Cipher Suite mappings (IEEE 802.11-2016)
 RSN_CIPHER_MAP = {
@@ -158,6 +168,58 @@ class Client:
         
         if probe and probe != "":
             self.probes.add(probe)
+
+def channel_hopper(interface, channels=None, dwell_time=0.1):
+    """Continuously hop through WiFi channels"""
+    global hopping_active, current_channel
+
+    if channels is None:
+        # get_supported_channels does not take an interface argument
+        channels = get_supported_channels()
+
+    if not channels:
+        print(f"Warning: No valid channels found for {interface}, using defaults")
+        channels = [1, 6, 11]
+    print(f"Channel hopping started on channels: {channels}")
+
+    while hopping_active:
+        for channel in channels:
+            if not hopping_active:
+                break
+            
+            try:
+                stdout,stderr = run_command(f"iw dev {interface} set channel {channel}")
+                if stderr and "command failed" in stderr.lower():
+                    continue
+
+                current_channel = channel
+                time.sleep(dwell_time)
+
+            except Exception as e:
+                pass
+
+    print("Channel hopping stopped")
+
+
+def get_supported_channels():
+    """Parse `iw list` output and return a sorted list of usable channel numbers."""
+    try:
+        output = subprocess.check_output(['iw', 'list'], text=True, stderr=subprocess.DEVNULL)
+    except Exception:
+        return []
+
+    channels = []
+    for line in output.splitlines():
+        line = line.strip()
+        m = re.search(r"\[(\d+)\]", line)
+        if m:
+            if '(disabled)' in line:
+                continue
+            ch = int(m.group(1))
+            channels.append(ch)
+
+    print("Successfully detected channels")
+    return sorted(set(channels))
 
 
 def get_crypto_info(packet):
@@ -430,33 +492,21 @@ def display_interface(interface, channel):
     global start_time, packet_count
     
     elapsed = datetime.now() - start_time
-    elapsed_str = str(elapsed).split('.')[0]
+    elapsed_seconds = int(elapsed.total_seconds())
     
     if channel:
-        ch_display = f"CH {channel}"
+        ch_display = f"CH {channel:>2}"
     else:
-        ch_display = "Hopping"
+        ch_display = "CH  -"
     
-    elapsed_seconds = max(1, (datetime.now() - start_time).total_seconds())
-    pps = int(packet_count / elapsed_seconds)
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
     
-    border = "═" * 96
-    print(f"\n╔{border}╗")
-    print(f"║ hitdump-ng v1.0{' ' * 80}║")
-    print(f"╠{border}╣")
-    print(f"║ Interface: {interface:15s} │ Channel: {ch_display:10s} │ Elapsed: {elapsed_str:8s} │ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ║")
-    print(f"║ Packets: {packet_count:10d} │ Rate: {pps:6d} pkt/s │ APs: {len(access_points):6d} │ Clients: {len(clients):6d}       ║")
-    print(f"╚{border}╝\n")
+    print(f" {ch_display} ][ Elapsed: {elapsed_seconds} s ][ {timestamp}\n")
 
 
 def display_access_points():
-    """Display discovered access points in a table"""
-    border = "─" * 96
-    print(f"┌{border}┐")
-    print(f"│{' ' * 39}ACCESS POINTS{' ' * 45}│")
-    print(f"├{border}┤")
-    print(f"│ BSSID                PWR  Beacons  #Data  CH   ENC        CIPHER   AUTH    ESSID                │")
-    print(f"├{border}┤")
+    """Display discovered access points"""
+    print(" BSSID              PWR  Beacons    #Data, #/s  CH   MB   ENC CIPHER  AUTH ESSID\n")
     
     with ap_lock:
         sorted_aps = sorted(
@@ -466,49 +516,24 @@ def display_access_points():
         )
         
         if not sorted_aps:
-            print(f"│ No access points detected yet... Keep scanning{' ' * 48}│")
+            print(" No access points detected yet...")
         
         for ap in sorted_aps:
+            ch_str = str(ap.channel) if ap.channel != -1 else "-"
+            essid = ap.essid[:20] if len(ap.essid) <= 20 else ap.essid[:17] + "..."
+            
+            #TODO: Implement data rate calculation based on packet sizes and timestamps, currently just a placeholder
+            data_rate = 0
 
-            if ap.power >= -50:
-                signal_bars = "▰▰▰▰"
-            elif ap.power >= -60:
-                signal_bars = "▰▰▰▱"
-            elif ap.power >= -70:
-                signal_bars = "▰▰▱▱"
-            elif ap.power >= -80:
-                signal_bars = "▰▱▱▱"
-            else:
-                signal_bars = "▱▱▱▱"
+            #TODO: Implement max bitrate calculation based on capabilities, currently just a placeholder 
+            max_bitrate = 270
             
-            ch_str = str(ap.channel) if ap.channel != -1 else "?"
-            
-            essid = ap.essid[:16] if len(ap.essid) <= 16 else ap.essid[:13] + "..."
-            
-            bssid_col = f"{ap.bssid:17s}"
-            pwr_col = f"{signal_bars} {ap.power:3d}"
-            beacons_col = f"{ap.beacons:7d}"
-            data_col = f"{ap.data_packets:6d}"
-            ch_col = f"{ch_str:>3s}"
-            enc_col = f"{ap.crypto:10s}"
-            cipher_col = f"{ap.cipher:8s}"
-            auth_col = f"{ap.auth:7s}"
-            essid_col = f"{essid:16s}"
-            
-            print(f"│ {bssid_col}  {pwr_col}  {beacons_col}  {data_col}  {ch_col}  {enc_col}  {cipher_col}  {auth_col}  {essid_col} │")
-    
-    border = "─" * 96
-    print(f"└{border}┘")
+            print(f" {ap.bssid.upper():17s}  {ap.power:>3d}  {ap.beacons:>7d}    {ap.data_packets:>5d} {data_rate:>4d}  {ch_str:>2s}  {max_bitrate:>3d}   {ap.crypto:4s} {ap.cipher:6s}  {ap.auth:4s} {essid}")
 
 
 def display_clients():
-    """Display discovered clients in a table"""
-    border = "─" * 96
-    print(f"\n┌{border}┐")
-    print(f"│{' ' * 43}STATIONS{' ' * 45}│")
-    print(f"├{border}┤")
-    print(f"│ CLIENT MAC          PWR  Packets   Rate    BSSID              Probed ESSIDs            │")
-    print(f"├{border}┤")
+    """Display discovered clients"""
+    print("\n BSSID              STATION            PWR    Rate    Lost   Frames  Notes  Probes\n")
     
     with client_lock:
         sorted_clients = sorted(
@@ -518,32 +543,24 @@ def display_clients():
         )[:30]
         
         if not sorted_clients:
-            print(f"│ No stations detected yet... Waiting for activity{' ' * 44}│")
+            print(" No stations detected yet...")
         
         for client in sorted_clients:
-            elapsed = (datetime.now() - client.first_seen).total_seconds()
-            rate = int(client.packets / max(1, elapsed)) if elapsed > 0 else 0
-            rate_str = f"{rate}/s" if rate > 0 else "-"
-            
+            #TODO: implement the rate display method, currently just a placeholder 
+            rate_display = "0 - 0"
+            #TODO: implement packet loss calculation, currently just a placeholder
+            lost = 0
+
+
             probes_list = list(client.probes)[:2]
-            probes_str = ", ".join(probes_list) if probes_list else "-"
-            if len(client.probes) > 2:
-                probes_str += f" +{len(client.probes) - 2}"
+            probes_str = ", ".join(probes_list) if probes_list else ""
             
-            if len(probes_str) > 24:
-                probes_str = probes_str[:21] + "..."
+            if len(probes_str) > 20:
+                probes_str = probes_str[:17] + "..."
             
-            mac_col = f"{client.mac:17s}"
-            pwr_col = f"{client.power:4d}"
-            packets_col = f"{client.packets:8d}"
-            rate_col = f"{rate_str:>7s}"
-            bssid_col = f"{client.bssid:17s}"
-            probes_col = f"{probes_str:24s}"
+            bssid_display = client.bssid.upper() if client.bssid != "(not associated)" else "(not associated)"
             
-            print(f"│ {mac_col}  {pwr_col}  {packets_col}  {rate_col}  {bssid_col}  {probes_col} │")
-    
-    border = "─" * 96
-    print(f"└{border}┘")
+            print(f" {bssid_display:17s}  {client.mac.upper():17s}  {client.power:>3d}    {rate_display:7s}  {lost:>5d}   {client.packets:>6d}         {probes_str}")
 
 
 def display_stats():
@@ -555,30 +572,6 @@ def display_stats():
     display_access_points()
     
     display_clients()
-    
-    with ap_lock:
-        open_aps = sum(1 for ap in access_points.values() if ap.crypto == "OPN")
-        wpa2_aps = sum(1 for ap in access_points.values() if ap.crypto == "WPA2")
-        wpa3_aps = sum(1 for ap in access_points.values() if ap.crypto in ["WPA3", "OWE"])
-        wep_aps = sum(1 for ap in access_points.values() if ap.crypto == "WEP")
-    
-    with client_lock:
-        associated = sum(1 for c in clients.values() if c.bssid != "(not associated)")
-        probing = len(clients) - associated
-    
-    border = "═" * 96
-    print(f"\n╔{border}╗")
-    print(f"║ STATISTICS{' ' * 86}║")
-    print(f"╠{border}╣")
-    print(f"║ Networks: Open: {open_aps:3d} │ WEP: {wep_aps:3d} │ WPA2: {wpa2_aps:3d} │ WPA3: {wpa3_aps:3d}{' ' * 40}║")
-    print(f"║ Stations: Associated: {associated:3d} │ Probing: {probing:3d}{' ' * 54}║")
-    
-    if filter_bssid:
-        print(f"║ Filter: Monitoring BSSID {filter_bssid}{' ' * 49}║")
-    
-    print(f"╠{border}╣")
-    print(f"║ Press Ctrl+C to stop capture{' ' * 68}║")
-    print(f"╚{border}╝")
 
 
 def display_loop(interval=2):
@@ -595,38 +588,44 @@ def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=N
     """Start packet capture on the specified interface"""
     global start_time, current_interface, current_channel, output_file, filter_bssid
 
+    global hop_thread, hopping_active
+
     current_interface = interface
     current_channel = channel
     output_file = output_file_path
     filter_bssid = target_bssid
     start_time = datetime.now()
 
-    print(f"\n{Fore.CYAN}╔═══════════════════════════════════════════════════════════════╗{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}║{Style.RESET_ALL}                    {Fore.GREEN}Starting hitdump-ng{Style.RESET_ALL}                     {Fore.CYAN}║{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}╚═══════════════════════════════════════════════════════════════╝{Style.RESET_ALL}\n")
-    
-    print(f"  {Fore.YELLOW}Interface:{Style.RESET_ALL}  {interface}")
+    print(f"\nStarting hitdump-ng")
+    print(f"Interface: {interface}")
     
     if channel:
-        print(f"  {Fore.YELLOW}Channel:{Style.RESET_ALL}    {channel}")
-        print(f"  {Fore.CYAN}Setting channel to {channel}...{Style.RESET_ALL}")
+        print(f"Channel: {channel}")
+        print(f"Setting channel to {channel}...")
         stdout, stderr = run_command(f"iw dev {interface} set channel {channel}")
         if stderr:
-            print(f"  {Fore.RED}   Failed to set channel: {stderr}{Style.RESET_ALL}")
-            print(f"  {Fore.YELLOW}Continuing anyway...{Style.RESET_ALL}")
+            print(f"Failed to set channel: {stderr}")
+            print(f"Continuing anyway...")
         else:
-            print(f"  {Fore.GREEN}✓ Channel set successfully{Style.RESET_ALL}")
+            print(f"Channel set successfully")
     else:
-        print(f"  {Fore.YELLOW}Channel:{Style.RESET_ALL}    Hopping (scanning all channels)")
+        print(f"Channel: Hopping (scanning all channels)")
+        try:
+            hopping_active = True
+            hop_thread = threading.Thread(target=channel_hopper, args=(interface, None, 0.1), daemon=True)
+            hop_thread.start()
+            print("Channel hopper thread started")
+        except Exception as e:
+            print(f"Failed to start channel hopper: {e}")
 
     if filter_bssid:
-        print(f"  {Fore.YELLOW}Filter:{Style.RESET_ALL}     BSSID = {Fore.CYAN}{filter_bssid}{Style.RESET_ALL}")
+        print(f"Filter: BSSID = {filter_bssid}")
     
     if output_file:
-        print(f"  {Fore.YELLOW}Output:{Style.RESET_ALL}     {output_file}")
+        print(f"Output: {output_file}")
     
-    print(f"\n  {Fore.GREEN}✓ Starting packet capture...{Style.RESET_ALL}")
-    print(f"  {Fore.CYAN}Initializing... Please wait...{Style.RESET_ALL}\n")
+    print(f"\nStarting packet capture...")
+    print(f"Initializing... Please wait...\n")
     
     time.sleep(2)
 
@@ -640,22 +639,29 @@ def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=N
             store=False
         )
     except KeyboardInterrupt:
-        print(f"\n{Fore.YELLOW}Stopping capture...{Style.RESET_ALL}")
+        print(f"\nStopping capture...")
     except Exception as e:
-        print(f"\n{Fore.RED}Error during capture: {e}{Style.RESET_ALL}")
+        print(f"\nError during capture: {e}")
     finally:
+
+        try:
+            hopping_active = False
+            if hop_thread and hasattr(hop_thread, 'is_alive') and hop_thread.is_alive():
+                hop_thread.join(timeout=1)
+        except Exception:
+            pass
         if output_file and captured_packets:
-            print(f"\n{Fore.CYAN}Writing {len(captured_packets)} packets to {output_file}...{Style.RESET_ALL}")
+            print(f"\nWriting {len(captured_packets)} packets to {output_file}...")
             try:
                 wrpcap(output_file, captured_packets)
-                print(f"{Fore.GREEN}PCAP file saved successfully.{Style.RESET_ALL}")
+                print(f"PCAP file saved successfully.")
             except Exception as e:
-                print(f"{Fore.RED}Failed to write PCAP: {e}{Style.RESET_ALL}")
+                print(f"Failed to write PCAP: {e}")
         
-        print(f"\n{Fore.GREEN}Capture stopped.{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}Total Access Points: {len(access_points)}")
+        print(f"\nCapture stopped.")
+        print(f"Total Access Points: {len(access_points)}")
         print(f"Total Clients: {len(clients)}")
-        print(f"Total Packets: {packet_count}{Style.RESET_ALL}")
+        print(f"Total Packets: {packet_count}")
 
 
 def _check_monitor_mode(interface):
@@ -666,30 +672,28 @@ def _check_monitor_mode(interface):
         if "type monitor" in result.lower():
             return True
         else:
-            print(f"\n{Fore.RED}╔═══════════════════════════════════════════════════════════════╗{Style.RESET_ALL}")
-            print(f"{Fore.RED}║{Style.RESET_ALL}       Error: Interface {interface} is not in monitor mode   {Fore.RED}║{Style.RESET_ALL}")
-            print(f"{Fore.RED}╚═══════════════════════════════════════════════════════════════╝{Style.RESET_ALL}\n")
+            print(f"\nError: Interface {interface} is not in monitor mode")
             
             all_interfaces = os.listdir("/sys/class/net")
             monitor_interfaces = [iface for iface in all_interfaces if "mon" in iface.lower()]
             
             if monitor_interfaces:
-                print(f"{Fore.YELLOW}Available monitor interfaces:{Style.RESET_ALL}")
+                print(f"Available monitor interfaces:")
                 for iface in monitor_interfaces:
-                    print(f"  • {Fore.GREEN}{iface}{Style.RESET_ALL}")
-                print(f"\n{Fore.CYAN}Try: sudo hitdump {monitor_interfaces[0]}{Style.RESET_ALL}\n")
+                    print(f"  • {iface}")
+                print(f"\nTry: sudo hitdump {monitor_interfaces[0]}\n")
             else:
-                print(f"{Fore.YELLOW}No monitor mode interfaces found.{Style.RESET_ALL}")
-                print(f"{Fore.CYAN}Enable monitor mode first:{Style.RESET_ALL}")
+                print(f"No monitor mode interfaces found.")
+                print(f"Enable monitor mode first:")
                 
                 base_interface = interface.replace("mon", "")
-                print(f"  sudo hitmon start {base_interface}\n")
-                print(f"{Fore.CYAN}Then run hitdump with the monitor interface:{Style.RESET_ALL}")
+                print(f"  sudo hitmon start {base_interface}")
+                print(f"\nThen run hitdump with the monitor interface:")
                 print(f"  sudo hitdump {base_interface}mon\n")
             
             return False
     except Exception as e:
-        print(f"{Fore.RED}Error checking monitor mode: {e}{Style.RESET_ALL}")
+        print(f"Error checking monitor mode: {e}")
         return False
 
 
@@ -755,22 +759,13 @@ def main():
 
     if args.channel:
         if not ((1 <= args.channel <= 14) or (36 <= args.channel <= 165)):
-            print(
-                f"{Fore.RED}Invalid channel. Must be 1-14 (2.4GHz) or 36-165 (5GHz){Style.RESET_ALL}"
-            )
+            print(f"Invalid channel. Must be 1-14 (2.4GHz) or 36-165 (5GHz)")
             sys.exit(1)
 
     if args.bssid:
         check_mac(args.bssid)
 
-    print(f"{Fore.GREEN}Starting hitdump-ng...{Style.RESET_ALL}")
     start_sniffer(args.interface, args.channel, args.write, args.bssid)
-
-
-current_interface = None
-current_channel = None
-output_file = None
-filter_bssid = None
 
 
 if __name__ == "__main__":
