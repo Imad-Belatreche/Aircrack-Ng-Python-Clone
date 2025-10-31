@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import argcomplete
+from argcomplete.completers import ChoicesCompleter
 
 from pathlib import Path
 
@@ -271,8 +272,7 @@ def main():
         epilog="@By NS-Guys",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    subparser = parser.add_subparsers(dest="command", help="")
-    subparser.required = True
+    subparser = parser.add_subparsers(dest="command", help="", required=True)
     commands = [
         ("proc", "Show interfering proccesses"),
         ("start", "Enable monitor mode on given interface"),
@@ -298,7 +298,7 @@ def main():
             add_interface_argument(command_parser)
             command_parser.add_argument(
                 "channel", nargs="?", help="Optional channel to set the nic"
-            )
+            ).completer = ChoicesCompleter(map(str, range(1, 15)))
         if name == "stop":
             # stop argument
             add_interface_argument(command_parser)
