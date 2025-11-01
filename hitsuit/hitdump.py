@@ -328,6 +328,12 @@ def get_rssi(packet):
         return -100
 
 
+def save_packet(packet):
+    """Save packet to capture file if output is enabled"""
+    if output_file:
+        captured_packets.append(packet)
+
+
 def packet_handler(packet):
     """Process each captured packet"""
     global packet_count, access_points, clients, captured_packets, filter_bssid
@@ -337,9 +343,6 @@ def packet_handler(packet):
     try:
         if not packet.haslayer(Dot11):
             return
-        
-        if output_file:
-            captured_packets.append(packet)
         
         power = get_rssi(packet)
         
@@ -385,6 +388,8 @@ def packet_handler(packet):
                 ap = access_points[bssid]
                 ap.beacons += 1
                 ap.update(essid=essid, channel=channel, power=power)
+            
+            save_packet(packet)
         
         elif packet.haslayer(Dot11ProbeResp):
             bssid = addr3 or addr2
@@ -418,14 +423,20 @@ def packet_handler(packet):
                 
                 ap = access_points[bssid]
                 ap.update(essid=essid, channel=channel, power=power)
+            
+            save_packet(packet)
         
         elif packet.haslayer(Dot11ProbeReq):
+
+            if filter_bssid:
+                return
+            
             client_mac = addr2
             
             probe_essid = ""
             p = packet[Dot11Elt]
             while p:
-                if p.ID == 0 and p.len > 0:
+                if p.ID == 0 and p.len > 0: 
                     try:
                         probe_essid = p.info.decode('utf-8', errors='ignore')
                     except:
@@ -437,6 +448,8 @@ def packet_handler(packet):
                     clients[client_mac] = Client(client_mac)
                 
                 clients[client_mac].update(power=power, probe=probe_essid)
+            
+            save_packet(packet)
         
         elif packet.haslayer(Dot11AssoReq) or packet.haslayer(Dot11ReassoReq):
             client_mac = addr2
@@ -454,6 +467,8 @@ def packet_handler(packet):
             with ap_lock:
                 if bssid in access_points:
                     access_points[bssid].clients.add(client_mac)
+            
+            save_packet(packet)
         
         elif dot11.type == 2:
             
@@ -482,6 +497,8 @@ def packet_handler(packet):
                     clients[client_mac] = Client(client_mac, bssid)
                 
                 clients[client_mac].update(bssid=bssid, power=power)
+            
+            save_packet(packet)
 
     except Exception as e:
         pass
