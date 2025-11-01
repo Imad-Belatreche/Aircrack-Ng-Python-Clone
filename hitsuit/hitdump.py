@@ -153,11 +153,13 @@ class Client:
         self.power = -100
         self.packets = 0
         self.last_seq = None
-        self.expected_packets = 0
-        self.lost_packets = 0
         self.first_seen = datetime.now()
         self.last_seen = datetime.now()
         self.probes = set()
+        
+        self.window_frames = 0
+        self.window_lost = 0
+        self.window_start = datetime.now()
 
     def update(self, bssid=None, power=None, probe=None):
         """Update client information"""
@@ -194,9 +196,7 @@ class Client:
                 gap = (seq_num - expected_seq) % 4096
                 
                 if 0 < gap < 100:
-                    self.lost_packets += gap
-            
-            self.expected_packets += 1
+                    self.window_lost += gap
 
         self.last_seq = seq_num
 
@@ -239,6 +239,28 @@ def data_rate_update():
                 ap.current_data_rate = int(packets_diff / time_diff)
                 ap.last_data_count = ap.data_packets
                 ap.last_rate_update = now
+
+
+def update_window_stats(interval=5):
+    """
+    Update windowed statistics for all clients periodically.
+    Calculates RX quality and resets window counters every interval seconds.
+    """
+    while True:
+        try:
+            time.sleep(interval)
+            
+            with client_lock:
+                now = datetime.now()
+                for client in clients.values():
+
+                    client.window_frames = 0
+                    client.window_lost = 0
+                    client.window_start = now
+        
+        except Exception:
+            pass
+
 
 def channel_hopper(interface, channels=None, dwell_time=0.1):
     """Continuously hop through WiFi channels"""
@@ -566,7 +588,10 @@ def packet_handler(packet):
                 clients[client_mac].update(bssid=bssid, power=power)
                 
                 if sequence is not None:
-                    clients[client_mac].update_sequence(sequence, is_retry(packet))
+                    retry = is_retry(packet)
+                    clients[client_mac].update_sequence(sequence, retry)
+                    if not retry:
+                        clients[client_mac].window_frames += 1
             
             save_packet(packet)
 
@@ -631,8 +656,8 @@ def display_clients():
         for client in sorted_clients:
             #TODO: implement the rate display method, currently just a placeholder 
             rate_display = "0 - 0"
-            lost = client.lost_packets
-
+            lost = client.window_lost
+            quality = client.rx_quality
 
             probes_list = list(client.probes)[:2]
             probes_str = ", ".join(probes_list) if probes_list else ""
@@ -646,17 +671,20 @@ def display_clients():
 
 def display_stats():
     """Display all statistics"""
-    os.system('clear' if os.name == 'posix' else 'cls')
-    
+    sys.stdout.write("\033[H\033[J")
+    sys.stdout.flush()
+
     data_rate_update()
 
     display_interface(current_interface, current_channel)
     
     display_access_points()
-    
-    display_clients()
 
-def display_loop(interval=2):
+    display_clients()
+    
+
+
+def display_loop(interval=1):
     """Continuously update the display"""
     while True:
         try:
@@ -709,6 +737,10 @@ def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=N
     print(f"Initializing... Please wait...\n")
     
     time.sleep(2)
+
+    # Start windowed statistics update thread
+    window_stats_thread = threading.Thread(target=update_window_stats, args=(5,), daemon=True)
+    window_stats_thread.start()
 
     display_thread = threading.Thread(target=display_loop, daemon=True)
     display_thread.start()
