@@ -111,7 +111,6 @@ WPA_AUTH_MAP = {
     1: "MGT",
     2: "PSK",
 }
-
 class AccessPoint:
     """Represents a discovered access point"""
 
@@ -124,6 +123,9 @@ class AccessPoint:
         self.auth = auth
         self.beacons = 0
         self.data_packets = 0
+        self.last_data_count = 0
+        self.last_rate_update = datetime.now()
+        self.current_data_rate = 0
         self.power = -100
         self.first_seen = datetime.now()
         self.last_seen = datetime.now()
@@ -142,7 +144,6 @@ class AccessPoint:
         if power and power > self.power:
             self.power = int(0.7 * self.power + 0.3 * power)
 
-
 class Client:
     """Represents a discovered client station"""
 
@@ -151,6 +152,9 @@ class Client:
         self.bssid = bssid or "(not associated)"
         self.power = -100
         self.packets = 0
+        self.last_seq = None
+        self.expected_packets = 0
+        self.lost_packets = 0
         self.first_seen = datetime.now()
         self.last_seen = datetime.now()
         self.probes = set()
@@ -168,6 +172,73 @@ class Client:
         
         if probe and probe != "":
             self.probes.add(probe)
+
+    def update_sequence(self, seq_num, is_retry=False):
+        """
+        Update sequence number and detect packet loss
+        
+        Args:
+            seq_num: Sequence number (0-4095)
+            is_retry: True if this is a retransmission
+        """
+        if is_retry:
+            return
+        
+        if self.last_seq is not None and seq_num == self.last_seq:
+            return
+        
+        if self.last_seq is not None:
+            expected_seq = (self.last_seq + 1) % 4096
+            
+            if seq_num != expected_seq:
+                gap = (seq_num - expected_seq) % 4096
+                
+                if 0 < gap < 100:
+                    self.lost_packets += gap
+            
+            self.expected_packets += 1
+
+        self.last_seq = seq_num
+
+def is_retry(packet):
+    """Check if packet is a retransmission"""
+    try:
+        if packet.haslayer(Dot11):
+            return (packet[Dot11].FCfield & 0x08) != 0
+        return False
+    except Exception:
+        return False
+
+def get_sequence_number(packet):
+    """Extract sequence number from 802.11 frame"""
+    
+    try:
+        if not packet.haslayer(Dot11):
+            return None
+        
+        dot11 = packet[Dot11]
+        
+        if hasattr(dot11, 'SC'):
+            sc = dot11.SC
+            sequence = (sc >> 4) & 0xFFF
+            return sequence
+        
+        return None
+    
+    except Exception:
+        return None
+
+def data_rate_update():
+    """update data rates for all APs"""
+    with ap_lock:
+        now = datetime.now()
+        for ap in access_points.values():
+            time_diff = (now - ap.last_rate_update).total_seconds()
+            if time_diff >= 1.0:
+                packets_diff = ap.data_packets - ap.last_data_count
+                ap.current_data_rate = int(packets_diff / time_diff)
+                ap.last_data_count = ap.data_packets
+                ap.last_rate_update = now
 
 def channel_hopper(interface, channels=None, dwell_time=0.1):
     """Continuously hop through WiFi channels"""
@@ -200,7 +271,6 @@ def channel_hopper(interface, channels=None, dwell_time=0.1):
 
     print("Channel hopping stopped")
 
-
 def get_supported_channels():
     """Parse `iw list` output and return a sorted list of usable channel numbers."""
     try:
@@ -220,7 +290,6 @@ def get_supported_channels():
 
     print("Successfully detected channels")
     return sorted(set(channels))
-
 
 def get_crypto_info(packet):
     """
@@ -312,7 +381,6 @@ def get_crypto_info(packet):
         traceback.print_exc()
         return "OPN", "", ""
 
-
 def get_rssi(packet):
     """Extract RSSI/signal strength from RadioTap header"""
     try:
@@ -327,12 +395,10 @@ def get_rssi(packet):
     except Exception:
         return -100
 
-
 def save_packet(packet):
     """Save packet to capture file if output is enabled"""
     if output_file:
         captured_packets.append(packet)
-
 
 def packet_handler(packet):
     """Process each captured packet"""
@@ -345,7 +411,8 @@ def packet_handler(packet):
             return
         
         power = get_rssi(packet)
-        
+        sequence = get_sequence_number(packet)
+
         dot11 = packet[Dot11]
         
         addr1 = dot11.addr1
@@ -497,12 +564,14 @@ def packet_handler(packet):
                     clients[client_mac] = Client(client_mac, bssid)
                 
                 clients[client_mac].update(bssid=bssid, power=power)
+                
+                if sequence is not None:
+                    clients[client_mac].update_sequence(sequence, is_retry(packet))
             
             save_packet(packet)
 
     except Exception as e:
         pass
-
 
 def display_interface(interface, channel):
     """Display header information"""
@@ -519,7 +588,6 @@ def display_interface(interface, channel):
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
     
     print(f" {ch_display} ][ Elapsed: {elapsed_seconds} s ][ {timestamp}\n")
-
 
 def display_access_points():
     """Display discovered access points"""
@@ -539,14 +607,12 @@ def display_access_points():
             ch_str = str(ap.channel) if ap.channel != -1 else "-"
             essid = ap.essid[:20] if len(ap.essid) <= 20 else ap.essid[:17] + "..."
             
-            #TODO: Implement data rate calculation based on packet sizes and timestamps, currently just a placeholder
-            data_rate = 0
+            data_rate = ap.current_data_rate
 
             #TODO: Implement max bitrate calculation based on capabilities, currently just a placeholder 
             max_bitrate = 270
             
             print(f" {ap.bssid.upper():17s}  {ap.power:>3d}  {ap.beacons:>7d}    {ap.data_packets:>5d} {data_rate:>4d}  {ch_str:>2s}  {max_bitrate:>3d}   {ap.crypto:4s} {ap.cipher:6s}  {ap.auth:4s} {essid}")
-
 
 def display_clients():
     """Display discovered clients"""
@@ -565,8 +631,7 @@ def display_clients():
         for client in sorted_clients:
             #TODO: implement the rate display method, currently just a placeholder 
             rate_display = "0 - 0"
-            #TODO: implement packet loss calculation, currently just a placeholder
-            lost = 0
+            lost = client.lost_packets
 
 
             probes_list = list(client.probes)[:2]
@@ -579,17 +644,17 @@ def display_clients():
             
             print(f" {bssid_display:17s}  {client.mac.upper():17s}  {client.power:>3d}    {rate_display:7s}  {lost:>5d}   {client.packets:>6d}         {probes_str}")
 
-
 def display_stats():
     """Display all statistics"""
     os.system('clear' if os.name == 'posix' else 'cls')
     
+    data_rate_update()
+
     display_interface(current_interface, current_channel)
     
     display_access_points()
     
     display_clients()
-
 
 def display_loop(interval=2):
     """Continuously update the display"""
@@ -599,7 +664,6 @@ def display_loop(interval=2):
             time.sleep(interval)
         except KeyboardInterrupt:
             break
-
 
 def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=None):
     """Start packet capture on the specified interface"""
@@ -680,7 +744,6 @@ def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=N
         print(f"Total Clients: {len(clients)}")
         print(f"Total Packets: {packet_count}")
 
-
 def _check_monitor_mode(interface):
     """Verify interface is in monitor mode"""
     try:
@@ -712,7 +775,6 @@ def _check_monitor_mode(interface):
     except Exception as e:
         print(f"Error checking monitor mode: {e}")
         return False
-
 
 def main():
     """Main function"""
@@ -783,7 +845,6 @@ def main():
         check_mac(args.bssid)
 
     start_sniffer(args.interface, args.channel, args.write, args.bssid)
-
 
 if __name__ == "__main__":
     main()
