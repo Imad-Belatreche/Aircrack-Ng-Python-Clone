@@ -156,7 +156,7 @@ class Client:
         self.first_seen = datetime.now()
         self.last_seen = datetime.now()
         self.probes = set()
-        
+
         self.window_frames = 0
         self.window_lost = 0
         self.window_start = datetime.now()
@@ -657,11 +657,9 @@ def display_clients():
             #TODO: implement the rate display method, currently just a placeholder 
             rate_display = "0 - 0"
             lost = client.window_lost
-            quality = client.rx_quality
 
             probes_list = list(client.probes)[:2]
             probes_str = ", ".join(probes_list) if probes_list else ""
-            
             if len(probes_str) > 20:
                 probes_str = probes_str[:17] + "..."
             
