@@ -11,6 +11,7 @@ PYTHON_BIN="${PYTHON:-python3}"
 DEST_DIR="/usr/local/bin"
 REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
 HITSUITE_DIR="$SCRIPT_DIR/hitsuit"
+VENV_DIR="$SCRIPT_DIR/.venv"
 commands_list=()
 
 setup_completions() {
@@ -33,34 +34,28 @@ setup_completions() {
 
     case "$shell_name" in
         bash|zsh)
-            if command -v activate-global-python-argcomplete >/dev/null 2>&1; then
-                echo "Registering global argcomplete for bash/zsh..."
+            echo "Registering global argcomplete for bash/zsh..."
+            # Try both methods for bash/zsh completion
+            if "$VENV_DIR/bin/python" -m argcomplete.scripts.activate_global_python_argcomplete >/dev/null 2>&1; then
+                "$VENV_DIR/bin/python" -m argcomplete.scripts.activate_global_python_argcomplete
+            elif command -v activate-global-python-argcomplete >/dev/null 2>&1; then
                 activate-global-python-argcomplete
             else
-                echo "Registering global argcomplete for bash/zsh..."
-                "$PYTHON_BIN" -m argcomplete.scripts.activate_global_python_argcomplete
+                echo "Warning: Could not set up global argcomplete for bash/zsh"
             fi
             ;;
         fish)
-            if ! command -v register-python-argcomplete >/dev/null 2>&1; then
-                echo "register-python-argcomplete not found; fish completions not configured."
-                return
-            fi
+            echo "Registering autocomplete for fish..."
             local comp_dir="$user_home/.config/fish/completions"
             sudo -u "$SUDO_USER" mkdir -p "$comp_dir"
             for command in "${commands_list[@]}"; do
                 local completion_file="$comp_dir/${command}.fish"
-                sudo -u "$SUDO_USER" register-python-argcomplete --shell fish "$command" \
-                    | sudo -u "$SUDO_USER" tee "$completion_file" >/dev/null
+                # Use the script from the virtual environment
+                sudo -u "$SUDO_USER" "$VENV_DIR/bin/register-python-argcomplete" --shell fish "$command" | sudo -u "$SUDO_USER" tee "$completion_file" >/dev/null
             done
-            echo "Registering autocomplete for fish..."
-
             ;;
         pwsh|powershell)
-            if ! command -v register-python-argcomplete >/dev/null 2>&1; then
-                echo "register-python-argcomplete not found; PowerShell completions not configured."
-                return
-            fi
+            echo "Registering autocomplete for powershell..."
             local module_dir="$user_home/.config/powershell/completions"
             sudo -u "$SUDO_USER" mkdir -p "$module_dir"
             local profile_file="$user_home/.config/powershell/Microsoft.PowerShell_profile.ps1"
@@ -68,15 +63,13 @@ setup_completions() {
             sudo -u "$SUDO_USER" touch "$profile_file"
             for command in "${commands_list[@]}"; do
                 local module_file="$module_dir/${command}.psm1"
-                sudo -u "$SUDO_USER" register-python-argcomplete --shell powershell "$command" \
-                    | sudo -u "$SUDO_USER" tee "$module_file" >/dev/null
+                # Use the script from the virtual environment
+                sudo -u "$SUDO_USER" "$VENV_DIR/bin/register-python-argcomplete" --shell powershell "$command" | sudo -u "$SUDO_USER" tee "$module_file" >/dev/null
                 local import_line="Import-Module \"${module_file}\""
                 if ! sudo -u "$SUDO_USER" grep -Fq "$import_line" "$profile_file"; then
                     printf '\n%s\n' "$import_line" | sudo -u "$SUDO_USER" tee -a "$profile_file" >/dev/null
                 fi
             done
-            echo "Registering autocomplete for powershell..."
-
             ;;
         *)
             echo "Shell '$shell_name' not automatically supported; configure completions manually."
@@ -84,22 +77,29 @@ setup_completions() {
     esac
 }
 
+echo "Creating virtual environment..."
+"$PYTHON_BIN" -m venv "$VENV_DIR"
+
 echo "Installing Python dependencies..."
-if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    sudo -u "${SUDO_USER}" -H "$PYTHON_BIN" -m pip install --user -r "$REQUIREMENTS_FILE"
-else
-    "$PYTHON_BIN" -m pip install -r "$REQUIREMENTS_FILE"
-fi
+"$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
+
 shopt -s nullglob
 for script in "$HITSUITE_DIR"/hit*.py; do
     base_name="$(basename "$script" .py)"
     commands_list+=("$base_name")
     echo "Preparing $base_name..."
     chmod +x "$script"
-    ln -sf "$script" "$DEST_DIR/$base_name"
+    
+    # Create a wrapper script that uses the virtual environment
+    cat > "$DEST_DIR/$base_name" << EOF
+#!/bin/bash
+"$VENV_DIR/bin/python" "$script" "\$@"
+EOF
     chmod +x "$DEST_DIR/$base_name"
 done
 shopt -u nullglob
 
 setup_completions
 echo "Installation complete."
+echo "Virtual environment created at: $VENV_DIR"
+echo "Commands installed: ${commands_list[*]}"
