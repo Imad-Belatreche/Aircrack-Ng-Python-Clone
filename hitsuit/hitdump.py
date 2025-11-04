@@ -36,6 +36,16 @@ if "_ARGCOMPLETE" not in os.environ:
     from helpers import check_root, run_command
 
     init(autoreset=True)
+from constants import (
+    RSN_CIPHER_MAP,
+    RSN_AUTH_MAP,
+    WPA_CIPHER_MAP,
+    WPA_AUTH_MAP,
+    AIRODUMP_MB_VALUES,
+    HT_MCS_RATES,
+    VHT_MCS_RATES,
+    HE_MCS_RATES
+)
 
 # GLOBAL DATA STRUCTURES
 access_points = {}
@@ -54,73 +64,300 @@ current_channel = None
 output_file = None
 filter_bssid = None
 
-# RSN (WPA2/WPA3) Cipher Suite mappings (IEEE 802.11-2016)
-RSN_CIPHER_MAP = {
-    0: "GROUP",
-    1: "WEP-40",
-    2: "TKIP",
-    3: "RESERVED",
-    4: "CCMP",
-    5: "WEP-104",
-    6: "BIP-CMAC",
-    7: "GROUP-NA",
-    8: "GCMP",
-    9: "GCMP-256",
-    10: "CCMP-256",
-    11: "BIP-GMAC-128",
-    12: "BIP-GMAC-256",
-    13: "BIP-CMAC-256",
-}
 
-# RSN Authentication and Key Management (AKM) Suite mappings
-RSN_AUTH_MAP = {
-    0: "RESERVED",
-    1: "MGT",
-    2: "PSK",
-    3: "FT-MGT",
-    4: "FT-PSK",
-    5: "MGT-SHA256",
-    6: "PSK-SHA256",
-    7: "TDLS",
-    8: "SAE",
-    9: "FT-SAE",
-    10: "AP-PEER",
-    11: "MGT-SUITE-B",
-    12: "MGT-SUITE-B-192",
-    13: "FT-MGT-SHA384",
-    14: "FILS-SHA256",
-    15: "FILS-SHA384",
-    16: "FT-FILS-SHA256",
-    17: "FT-FILS-SHA384",
-    18: "OWE",
-}
 
-# WPA (WPA1) Cipher Suite mappings
-WPA_CIPHER_MAP = {
-    0: "GROUP",
-    1: "WEP-40",
-    2: "TKIP",
-    3: "RESERVED",
-    4: "CCMP",
-    5: "WEP-104",
-}
+def parse_supported_rates(packet):
+    """
+    Extract maximum supported rate from legacy 802.11a/b/g networks.
+    Parses Element ID 1 (Supported Rates) and Element ID 50 (Extended Supported Rates).
+    """
+    try:
+        max_rate = 0.0
+        
+        if not packet.haslayer(Dot11Elt):
+            return max_rate
+        
+        elt = packet[Dot11Elt]
+        
+        while elt:
 
-# WPA (WPA1) Authentication Suite mappings
-WPA_AUTH_MAP = {
-    0: "RESERVED",
-    1: "MGT",
-    2: "PSK",
-}
+            if elt.ID in (1, 50) and elt.len > 0:
+                try:
+                    for byte in elt.info:
+                        if isinstance(byte, str):
+                            byte = ord(byte)
+                            
+                        rate = (byte & 0x7F) * 0.5
+                        if rate > max_rate:
+                            max_rate = rate
+                except Exception:
+                    pass
+            
+            elt = elt.payload.getlayer(Dot11Elt)
+        
+        return max_rate
+    
+    except Exception:
+        return 0.0
+
+
+def parse_ht_capabilities(packet):
+    """
+    Parse HT Capabilities (Element ID 45) for 802.11n networks.
+    Determines maximum throughput based on channel width, guard interval, and MCS.
+    """
+    try:
+        if not packet.haslayer(Dot11Elt):
+            return 0
+        
+        elt = packet[Dot11Elt]
+        
+        while elt:
+            if elt.ID == 45 and elt.len >= 26:
+                try:
+                    info = elt.info
+                    if isinstance(info, str):
+                        info = bytes(info, 'latin-1')
+                    
+                    ht_cap_info = int.from_bytes(info[0:2], byteorder='little')
+                    
+                    supports_40mhz = (ht_cap_info & 0x0002) != 0
+                    
+                    short_gi_20 = (ht_cap_info & 0x0020) != 0
+                    short_gi_40 = (ht_cap_info & 0x0040) != 0
+                    
+                    if len(info) >= 7:
+                        mcs_set = info[3:7]
+                        
+                        max_mcs = -1
+                        for byte_idx, byte_val in enumerate(mcs_set):
+                            if isinstance(byte_val, str):
+                                byte_val = ord(byte_val)
+                            for bit_idx in range(8):
+                                if byte_val & (1 << bit_idx):
+                                    mcs_idx = byte_idx * 8 + bit_idx
+                                    if mcs_idx <= 31:
+                                        max_mcs = mcs_idx
+                        
+                        if max_mcs >= 0 and max_mcs in HT_MCS_RATES:
+                            if supports_40mhz and short_gi_40:
+                                rate = HT_MCS_RATES[max_mcs][3]
+                            elif supports_40mhz:
+                                rate = HT_MCS_RATES[max_mcs][2]
+                            elif short_gi_20:
+                                rate = HT_MCS_RATES[max_mcs][1]
+                            else:
+                                rate = HT_MCS_RATES[max_mcs][0]
+                            
+                            return rate
+                    
+                except Exception:
+                    pass
+            
+            elt = elt.payload.getlayer(Dot11Elt)
+        
+        return 0
+    
+    except Exception:
+        return 0
+
+
+def parse_vht_capabilities(packet):
+    """
+    Parse VHT Capabilities (Element ID 191) for 802.11ac networks.
+    Calculates maximum throughput using comprehensive MCS tables.
+    """
+    try:
+        if not packet.haslayer(Dot11Elt):
+            return 0
+        
+        elt = packet[Dot11Elt]
+        
+        while elt:
+            if elt.ID == 191 and elt.len >= 12:
+                try:
+                    info = elt.info
+                    if isinstance(info, str):
+                        info = bytes(info, 'latin-1')
+                    vht_cap_info = int.from_bytes(info[0:4], byteorder='little')
+                    
+                    channel_width_set = (vht_cap_info >> 2) & 0x03
+                    if channel_width_set in (1, 2):
+                        bandwidth = 160
+                    else:
+                        bandwidth = 80
+                    
+                    short_gi_80 = (vht_cap_info & (1 << 5)) != 0
+                    short_gi_160 = (vht_cap_info & (1 << 6)) != 0
+                    
+                    if len(info) >= 6:
+                        mcs_map = int.from_bytes(info[4:6], byteorder='little')
+                        
+                        max_ss = 0
+                        max_mcs = 7
+                        
+                        for ss in range(1, 5):
+                            mcs_support = (mcs_map >> ((ss - 1) * 2)) & 0x03
+                            if mcs_support != 3:
+                                max_ss = ss
+                                if mcs_support == 2:
+                                    max_mcs = 9
+                                elif mcs_support == 1:
+                                    max_mcs = 8
+                                else:
+                                    max_mcs = 7
+                        
+                        if max_ss > 0 and bandwidth in VHT_MCS_RATES:
+                            if max_ss in VHT_MCS_RATES[bandwidth]:
+                                if max_mcs in VHT_MCS_RATES[bandwidth][max_ss]:
+                                    rates = VHT_MCS_RATES[bandwidth][max_ss][max_mcs]
+                                    
+                                    if bandwidth == 160 and short_gi_160:
+                                        return rates[1]
+                                    elif bandwidth == 80 and short_gi_80:
+                                        return rates[1]
+                                    else:
+                                        return rates[0]
+                    
+                except Exception:
+                    pass
+            
+            elt = elt.payload.getlayer(Dot11Elt)
+        
+        return 0
+    
+    except Exception:
+        return 0
+
+
+def parse_he_capabilities(packet):
+    """
+    Parse HE Capabilities (Element ID Extension 35) for 802.11ax networks.
+    Calculates maximum throughput using comprehensive MCS tables.
+    """
+    try:
+        if not packet.haslayer(Dot11Elt):
+            return 0
+        
+        elt = packet[Dot11Elt]
+        
+        while elt:
+
+            if elt.ID == 255 and elt.len > 1:
+                try:
+                    info = elt.info
+                    if isinstance(info, str):
+                        info = bytes(info, 'latin-1')
+                    
+                    ext_id = info[0] if isinstance(info[0], int) else ord(info[0])
+                    
+                    if ext_id == 35 and len(info) >= 22:
+                        
+                        phy_cap_byte0 = info[7] if isinstance(info[7], int) else ord(info[7])
+                        
+                        supports_160 = (phy_cap_byte0 & 0x0C) != 0
+                        supports_80 = (phy_cap_byte0 & 0x04) != 0
+                        
+                        if supports_160:
+                            bandwidth = 160
+                        elif supports_80:
+                            bandwidth = 80
+                        else:
+                            bandwidth = 20
+                        
+                        if len(info) >= 22:
+                            mcs_map_80 = int.from_bytes(info[18:20], byteorder='little')
+                            
+                            max_ss = 0
+                            max_mcs = 7
+                            
+                            for ss in range(1, 5):
+                                mcs_support = (mcs_map_80 >> ((ss - 1) * 2)) & 0x03
+                                if mcs_support != 3:
+                                    max_ss = ss
+                                    if mcs_support == 2:
+                                        max_mcs = 11
+                                    elif mcs_support == 1:
+                                        max_mcs = 9
+                                    else:
+                                        max_mcs = 7
+                            
+                            if max_ss > 0 and bandwidth in HE_MCS_RATES:
+                                if max_ss in HE_MCS_RATES[bandwidth]:
+                                    if max_mcs in HE_MCS_RATES[bandwidth][max_ss]:
+                                        rates = HE_MCS_RATES[bandwidth][max_ss][max_mcs]
+                                        return rates[0]
+                    
+                except Exception:
+                    pass
+            
+            elt = elt.payload.getlayer(Dot11Elt)
+        
+        return 0
+    
+    except Exception:
+        return 0
+
+
+def map_to_airodump_mb(raw_rate):
+    """
+    Convert calculated rate to nearest standard airodump-ng MB value.
+    This ensures consistency with airodump-ng display format.
+    """
+    if raw_rate <= 0:
+        return 54
+    
+    closest = min(AIRODUMP_MB_VALUES, key=lambda x: abs(x - raw_rate))
+    
+    return int(closest) if closest == int(closest) else closest
+
+
+def calculate_mb_value(packet):
+    """
+    Main function that replicates airodump-ng MB calculation.
+    Priority order:
+    1. HE Capabilities (802.11ax) - highest priority
+    2. VHT Capabilities (802.11ac)
+    3. HT Capabilities (802.11n)
+    4. Supported Rates (802.11a/b/g)
+    5. Fallback to 54 Mbps
+    """
+    try:
+        if not (packet.haslayer(Dot11Beacon) or packet.haslayer(Dot11ProbeResp)):
+            return 54
+        
+        he_rate = parse_he_capabilities(packet)
+        if he_rate > 0:
+            return map_to_airodump_mb(he_rate)
+        
+        vht_rate = parse_vht_capabilities(packet)
+        if vht_rate > 0:
+            return map_to_airodump_mb(vht_rate)
+        
+        ht_rate = parse_ht_capabilities(packet)
+        if ht_rate > 0:
+            return map_to_airodump_mb(ht_rate)
+        
+        legacy_rate = parse_supported_rates(packet)
+        if legacy_rate > 0:
+            return map_to_airodump_mb(legacy_rate)
+        
+        return 54
+    
+    except Exception:
+        return 54
+
 class AccessPoint:
     """Represents a discovered access point"""
 
-    def __init__(self, bssid, essid, channel, crypto, cipher, auth):
+    def __init__(self, bssid, essid, channel, crypto, cipher, auth, mb=54):
         self.bssid = bssid
         self.essid = essid or "<Hidden>"
         self.channel = channel
         self.crypto = crypto
         self.cipher = cipher
         self.auth = auth
+        self.mb = mb
         self.beacons = 0
         self.data_packets = 0
         self.last_data_count = 0
@@ -131,7 +368,7 @@ class AccessPoint:
         self.last_seen = datetime.now()
         self.clients = set()
 
-    def update(self, essid=None, channel=None, power=None):
+    def update(self, essid=None, channel=None, power=None, mb=None):
         """Update access point information"""
         self.last_seen = datetime.now()
         
@@ -143,6 +380,9 @@ class AccessPoint:
         
         if power and power > self.power:
             self.power = int(0.7 * self.power + 0.3 * power)
+        
+        if mb and mb > self.mb:
+            self.mb = mb
 
 class Client:
     """Represents a discovered client station"""
@@ -438,17 +678,7 @@ def write_csv(filename, aps_dict, clients_dict, ap_lock, client_lock):
                     first_seen = ap.first_seen.strftime("%Y-%m-%d %H:%M:%S")
                     last_seen = ap.last_seen.strftime("%Y-%m-%d %H:%M:%S")
                     channel = ap.channel if ap.channel != -1 else -1
-
-                    #TODO: Create a function that extracts the real speed from the frame instead of using static values.
-                    if 'WPA3' in ap.crypto or 'GCMP' in ap.cipher:
-                        speed = 270 # WiFi 6 (802.11ax)
-                    elif "WPA2" in ap.crypto:
-                        speed = 130  # WiFi 5 (802.11ac)
-                    elif "WPA" in ap.crypto:
-                        speed = 54   # WiFi 4 (802.11n)
-                    else:
-                        speed = 54   # Legacy
-
+                    speed = ap.mb
                     privacy = ap.crypto
                     cipher = ap.cipher if ap.cipher else ""
                     authentication = ap.auth if ap.auth else ""
@@ -588,16 +818,17 @@ def packet_handler(packet):
                 p = p.payload.getlayer(Dot11Elt)
             
             crypto, cipher, auth = get_crypto_info(packet)
+            mb_value = calculate_mb_value(packet)
             
             with ap_lock:
                 if bssid not in access_points:
                     access_points[bssid] = AccessPoint(
-                        bssid, essid, channel, crypto, cipher, auth
+                        bssid, essid, channel, crypto, cipher, auth, mb_value
                     )
                 
                 ap = access_points[bssid]
                 ap.beacons += 1
-                ap.update(essid=essid, channel=channel, power=power)
+                ap.update(essid=essid, channel=channel, power=power, mb=mb_value)
             
             save_packet(packet)
         
@@ -624,15 +855,16 @@ def packet_handler(packet):
                 p = p.payload.getlayer(Dot11Elt)
             
             crypto, cipher, auth = get_crypto_info(packet)
+            mb_value = calculate_mb_value(packet)
             
             with ap_lock:
                 if bssid not in access_points:
                     access_points[bssid] = AccessPoint(
-                        bssid, essid, channel, crypto, cipher, auth
+                        bssid, essid, channel, crypto, cipher, auth, mb_value
                     )
                 
                 ap = access_points[bssid]
-                ap.update(essid=essid, channel=channel, power=power)
+                ap.update(essid=essid, channel=channel, power=power, mb=mb_value)
             
             save_packet(packet)
         
@@ -750,15 +982,13 @@ def display_access_points():
             print(" No access points detected yet...")
         
         for ap in sorted_aps:
+
             ch_str = str(ap.channel) if ap.channel != -1 else "-"
             essid = ap.essid[:20] if len(ap.essid) <= 20 else ap.essid[:17] + "..."
-            
             data_rate = ap.current_data_rate
-
-            #TODO: Implement max bitrate calculation based on capabilities, currently just a placeholder 
-            max_bitrate = 270
+            max_bitrate = ap.mb
             
-            print(f" {ap.bssid.upper():17s}  {ap.power:>3d}  {ap.beacons:>7d}    {ap.data_packets:>5d} {data_rate:>4d}  {ch_str:>2s}  {max_bitrate:>3d}   {ap.crypto:4s} {ap.cipher:6s}  {ap.auth:4s} {essid}")
+            print(f" {ap.bssid.upper():17s}  {ap.power:>3d}  {ap.beacons:>7d}    {ap.data_packets:>5d} {data_rate:>4d}  {ch_str:>2s}  {max_bitrate:>3}   {ap.crypto:4s} {ap.cipher:6s}  {ap.auth:4s} {essid}")
 
 def display_clients():
     """Display discovered clients"""
