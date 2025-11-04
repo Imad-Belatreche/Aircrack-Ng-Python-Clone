@@ -916,7 +916,7 @@ def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=
             except Exception as e:
                 print(f"Failed to write CSV: {e}")
 
-        print(f"\\nCapture stopped.")
+        print(f"\nCapture stopped.")
         print(f"Total Access Points: {len(access_points)}")
         print(f"Total Clients: {len(clients)}")
         print(f"Total Packets: {packet_count}")
