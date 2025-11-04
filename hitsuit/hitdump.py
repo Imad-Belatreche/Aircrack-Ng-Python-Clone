@@ -416,6 +416,127 @@ def get_rssi(packet):
         return -100
     except Exception:
         return -100
+    
+
+def write_csv(filename, aps_dict, clients_dict, ap_lock, client_lock):
+    if not filename.endswith('.csv'):
+        filename = f"{filename}.csv"
+    try: 
+        with open(filename, 'w', encoding='utf-8') as f:
+
+            #Sections which handles writing AP's
+            f.write("BSSID, First time seen, Last time seen, channel, Speed, Privacy, "
+                   "Cipher, Authentication, Power, # beacons, # IV, LAN IP, ID-length, "
+                   "ESSID, Key\n")
+            with ap_lock:
+                sorted_aps = sorted(
+                    aps_dict.values(),
+                    key=lambda x: x.power,
+                    reverse=True
+                )
+                for ap in sorted_aps:
+                    first_seen = ap.first_seen.strftime("%Y-%m-%d %H:%M:%S")
+                    last_seen = ap.last_seen.strftime("%Y-%m-%d %H:%M:%S")
+                    channel = ap.channel if ap.channel != -1 else -1
+
+                    #TODO: Create a function that extracts the real speed from the frame instead of using static values.
+                    if 'WPA3' in ap.crypto or 'GCMP' in ap.cipher:
+                        speed = 270 # WiFi 6 (802.11ax)
+                    elif "WPA2" in ap.crypto:
+                        speed = 130  # WiFi 5 (802.11ac)
+                    elif "WPA" in ap.crypto:
+                        speed = 54   # WiFi 4 (802.11n)
+                    else:
+                        speed = 54   # Legacy
+
+                    privacy = ap.crypto
+                    cipher = ap.cipher if ap.cipher else ""
+                    authentication = ap.auth if ap.auth else ""
+
+                    power = ap.power
+                    beacons = ap.beacons
+
+                    #TODO: this is only related to WEP i'll figure out a way to calculate it later in WEP case.
+                    iv_count = 0
+                    #this element doesn't matter, it won't be shown at least in the airgraph-ng.
+                    lan_ip = "0.0.0.0"
+                    essid = ap.essid
+                    essid_length = len(essid)
+                    #well the key is only available when the AP is cracked. (no need for it anyways).
+                    key = ""
+                    
+                    f.write(f"{ap.bssid}, {first_seen}, {last_seen}, {channel}, "
+                           f"{speed}, {privacy}, {cipher}, {authentication}, "
+                           f"{power}, {beacons}, {iv_count}, {lan_ip}, "
+                           f"{essid_length}, {essid}, {key}\n")
+            
+            f.write("\n") # this is just a spacer for formatting.
+            
+            # And sections for clients.
+            f.write("Station MAC, First time seen, Last time seen, Power, # packets, "
+                   "BSSID, Probed ESSIDs\n")
+            
+            # Write Client data rows
+            with client_lock:
+                sorted_clients = sorted(
+                    clients_dict.values(),
+                    key=lambda x: x.packets,
+                    reverse=True
+                )
+                
+                for client in sorted_clients:
+                    
+                    first_seen = client.first_seen.strftime("%Y-%m-%d %H:%M:%S")
+                    last_seen = client.last_seen.strftime("%Y-%m-%d %H:%M:%S")
+                    power = client.power
+                    packets = client.packets
+                    bssid = client.bssid
+
+                    if client.probes:
+                        probed_essids = ",".join(sorted(client.probes))
+                    else:
+                        probed_essids = ""
+                    
+                    f.write(f"{client.mac}, {first_seen}, {last_seen}, "
+                           f"{power}, {packets}, {bssid}, {probed_essids}\n")
+        
+        print(f"[+] CSV file saved: {filename}")
+        return filename
+    
+    except PermissionError:
+        print(f"[!] Permission denied: Cannot write to {filename}")
+        return None
+    except IOError as e:
+        print(f"[!] I/O error writing CSV file: {e}")
+        return None
+    except Exception as e:
+        print(f"[!] Error writing CSV file: {e}")
+        import traceback
+        traceback.print_exc()
+        return None       
+
+def auto_save_csv(filename, aps_dict, clients_dict, ap_lock, client_lock, interval=30):
+    """
+    Periodically save CSV file in background thread.
+    Better than writing all at once on exit.  
+    """
+    def save_loop():
+        """Background thread function for periodic CSV saves"""
+        while True:
+            try:
+                time.sleep(interval)
+                write_csv(filename, aps_dict, clients_dict, ap_lock, client_lock)
+            except Exception as e:
+                pass
+
+    thread = threading.Thread(
+        target=save_loop,
+        name="csv_auto_save",
+        daemon=True
+    )
+    thread.start()
+    
+    return thread
 
 def save_packet(packet):
     """Save packet to capture file if output is enabled"""
@@ -691,7 +812,7 @@ def display_loop(interval=1):
         except KeyboardInterrupt:
             break
 
-def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=None):
+def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=None, target_bssid=None):
     """Start packet capture on the specified interface"""
     global start_time, current_interface, current_channel, output_file, filter_bssid
 
@@ -699,6 +820,7 @@ def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=N
 
     current_interface = interface
     current_channel = channel
+    csv_file = csv_file_path
     output_file = output_file_path
     filter_bssid = target_bssid
     start_time = datetime.now()
@@ -729,7 +851,10 @@ def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=N
         print(f"Filter: BSSID = {filter_bssid}")
     
     if output_file:
-        print(f"Output: {output_file}")
+        print(f"PCAP Output: {output_file}")
+    
+    if csv_file:
+        print(f"CSV Output: {csv_file}")
     
     print(f"\nStarting packet capture...")
     print(f"Initializing... Please wait...\n")
@@ -742,6 +867,18 @@ def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=N
 
     display_thread = threading.Thread(target=display_loop, daemon=True)
     display_thread.start()
+
+    csv_thread = None
+    if csv_file_path:
+        csv_thread = auto_save_csv(
+            csv_file_path, 
+            access_points,
+            clients,
+            ap_lock, 
+            client_lock, 
+            interval=30
+        )
+        print(f"CSV auto-save enabled (every 30 seconds)")
 
     try:
         sniff(
@@ -761,6 +898,7 @@ def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=N
                 hop_thread.join(timeout=1)
         except Exception:
             pass
+        
         if output_file and captured_packets:
             print(f"\nWriting {len(captured_packets)} packets to {output_file}...")
             try:
@@ -768,7 +906,16 @@ def start_sniffer(interface, channel=None, output_file_path=None, target_bssid=N
                 print(f"PCAP file saved successfully.")
             except Exception as e:
                 print(f"Failed to write PCAP: {e}")
-        
+
+        if csv_file:
+            try:
+                print(f"Saving final CSV data...")
+                write_csv(csv_file_path, access_points, clients, ap_lock, client_lock)
+                print(f"CSV file saved successfully.")
+
+            except Exception as e:
+                print(f"Failed to write CSV: {e}")
+
         print(f"\nCapture stopped.")
         print(f"Total Access Points: {len(access_points)}")
         print(f"Total Clients: {len(clients)}")
@@ -839,17 +986,23 @@ def main():
     )
 
     parser.add_argument(
-        "-w",
-        "--write",
+        "-wp",
+        "--write-pcap",
         help="Write captured packets to pcap file",
         metavar="FILE",
     )
 
     parser.add_argument(
-        "-d",
+        "-b",
         "--bssid",
         help="Filter and monitor only the specified BSSID (MAC address)",
         metavar="MAC",
+    )
+    parser.add_argument(
+        "-wv",
+        "--write-csv",
+        help="Write AP and client data to CSV file (airodump-ng format)",
+        metavar="FILE",
     )
 
     argcomplete.autocomplete(parser)
@@ -874,7 +1027,13 @@ def main():
     if args.bssid:
         check_mac(args.bssid)
 
-    start_sniffer(args.interface, args.channel, args.write, args.bssid)
+    start_sniffer(
+        args.interface, 
+        args.channel, 
+        args.write_pcap,
+        args.write_csv,
+        args.bssid
+    )
 
 if __name__ == "__main__":
     main()
