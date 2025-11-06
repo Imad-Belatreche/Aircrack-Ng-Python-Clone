@@ -116,7 +116,7 @@ def _deauth_attack(interface, bssid, count, client=None):
     is_monitor, _ = check_monitor(interface=interface)
     if not is_monitor:
         print(
-            f"{Fore.RED}Interface is not in monitor mode (current mode: {_}).\nUse hitmon to enable monitor mode."
+            f"{Fore.RED}Interface is not in monitor mode (current mode: {_}).\nUse hitmon to enable monitor mode (hitmon start {interface})"
         )
         sys.exit(1)
 
@@ -251,8 +251,9 @@ def main():
             print(
                 f"{Fore.YELLOW}No client (station) mac address given. Initiating broadcast deauthentication...{Fore.RESET}"
             )
-
-        _deauth_attack(args.interface, bssid.lower(), args.count, client.lower())
+            _deauth_attack(args.interface, bssid.lower(), args.count)
+        else:
+            _deauth_attack(args.interface, bssid.lower(), args.count, client.lower())
 
     else:
         print(f"{Fore.RED}Attack '{args.attack}' is not implemented yet.{Fore.RESET}")
