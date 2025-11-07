@@ -1,4 +1,3 @@
-from concurrent.futures import ThreadPoolExecutor
 import os
 import re
 import subprocess
@@ -6,9 +5,18 @@ import sys
 from scapy.layers.l2 import ARP
 from scapy.sendrecv import sr1
 from scapy.all import sniff, Packet
-from scapy.layers.dot11 import Dot11Beacon, Dot11ProbeResp, Dot11, Dot11Elt
+from scapy.layers.dot11 import Dot11Beacon, Dot11, Dot11Elt
 
 from colorama import Fore
+
+Interface_State = {0: "UP", 1: "DOWN", 2: "UNKNOWN"}
+""" **Shows the interface current state:**\n
+0: UP\n
+1: DOWN\n
+2: UNKNOWN\n
+"""
+
+
 
 
 # May be used later to ease user experience
@@ -94,6 +102,7 @@ def check_interface(interface):
 
 def check_monitor(interface):
     """Checks if monitor mode is enabled"""
+    check_interface(interface)
 
     out, err = run_command(f"iw dev {interface} info")
     if err:
@@ -120,7 +129,7 @@ def set_right_channel(interface, bssid):
     Uses actual channel information from beacon frames for accuracy.
     """
     print(f"{Fore.GREEN}\n+==============================================+{Fore.GREEN}")
-    
+
     out, _ = run_command(f"iw dev {interface} info | grep channel | awk '{{print $2}}'")
     init_channel = int(out)
 
