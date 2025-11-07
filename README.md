@@ -76,6 +76,44 @@ options:
 @By NS-Guys
 ```
 
+### Hitdump
+
+hitdump is a lightweight Wi-Fi scanning and monitoring tool designed to capture and display nearby access points and clients in real time. It operates in monitor mode to extract key details like BSSID, ESSID, signal strength, and channel, and optionally apply filters (e.g., ESSID or BSSID filters).
+
+```fish
+hitdump -h
+usage: hitdump [-h] [-c CH] [-wp FILE] [-b MAC] [-wv FILE] [-r PATTERN] interface
+
+  /$$       /$$   /$$           /$$                                  
+| $$      |__/  | $$          | $$                                  
+| $$$$$$$  /$$ /$$$$$$    /$$$$$$$ /$$   /$$  /$$$$$$  /$$$$$$/$$$$ 
+| $$__  $$| $$|_  $$_/   /$$__  $$| $$  | $$ /$$__  $$| $$_  $$_  $$
+| $$  \ $$| $$  | $$    | $$  | $$| $$  | $$| $$  \ $$| $$ \ $$ \ $$
+| $$  | $$| $$  | $$ /$$| $$  | $$| $$  | $$| $$  | $$| $$ | $$ | $$
+| $$  | $$| $$  |  $$$$/|  $$$$$$$|  $$$$$$/| $$$$$$$/| $$ | $$ | $$
+|__/  |__/|__/   \___/   \_______/ \______/ | $$____/ |__/ |__/ |__/
+                                            | $$                    
+                                            | $$                    
+                                            |__/                        
+
+Capture and display WiFi networks and clients in real-time
+
+positional arguments:
+  interface             The network interface to use.
+
+options:
+  -h, --help            show this help message and exit
+  -c, --channel CH      Set interface to specific channel (1-14 for 2.4GHz, 36-165 for 5GHz)
+  -wp, --write-pcap FILE
+                        Write captured packets to pcap file
+  -b, --bssid MAC       Filter and monitor only the specified BSSID (MAC address)
+  -wv, --write-csv FILE
+                        Write AP and client data to CSV file (airodump-ng format)
+  -r, --regex PATTERN   Filter APs by ESSID using regex pattern (e.g., '^Home.*', '.*WiFi$', 'Guest|Public')
+
+@By NS-Guys
+```
+
 ## Instalation
 
 Simple and easy, the installation script will do everything needed:
