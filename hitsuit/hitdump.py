@@ -63,6 +63,25 @@ current_interface = None
 current_channel = None
 output_file = None
 filter_bssid = None
+filter_essid_regex = None
+
+filtered_ap_count = 0
+total_ap_count = 0
+
+def matches_essid_filter(essid):
+    """Check if ESSID matches the regex filter"""
+    global filter_essid_regex
+    
+    if filter_essid_regex is None:
+        return True
+    
+    if essid == "<Hidden>":
+        return False
+    
+    try:
+        return filter_essid_regex.search(essid) is not None
+    except Exception:
+        return False
 
 def is_valid_client_mac(mac):
     """ Check if MAC address is a valid client (not broadcast/multicast) """
@@ -848,6 +867,9 @@ def packet_handler(packet):
                 
                 p = p.payload.getlayer(Dot11Elt)
             
+            if not matches_essid_filter(essid):
+                return
+            
             crypto, cipher, auth = get_crypto_info(packet)
             mb_value = calculate_mb_value(packet)
             
@@ -885,6 +907,9 @@ def packet_handler(packet):
                 
                 p = p.payload.getlayer(Dot11Elt)
             
+            if not matches_essid_filter(essid):
+                return
+
             crypto, cipher, auth = get_crypto_info(packet)
             mb_value = calculate_mb_value(packet)
             
@@ -993,8 +1018,9 @@ def packet_handler(packet):
         pass
 
 def display_interface(interface, channel):
-    """Display header information"""
-    global start_time, packet_count
+    """Display header information with filter status"""
+    global start_time, packet_count, filter_bssid, filter_essid_regex
+    global filtered_ap_count, total_ap_count
     
     elapsed = datetime.now() - start_time
     elapsed_seconds = int(elapsed.total_seconds())
@@ -1006,18 +1032,32 @@ def display_interface(interface, channel):
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
     
-    print(f" {ch_display} ][ Elapsed: {elapsed_seconds} s ][ {timestamp}\n")
+    filter_status = ""
+    if filter_bssid:
+        filter_status = f" [ FILTER: BSSID={filter_bssid.upper()} ]"
+    elif filter_essid_regex:
+        filter_status = f" [ FILTER: ESSID='{filter_essid_regex.pattern}' ]"
+        if total_ap_count > 0:
+            filter_status += f" [ APs: {filtered_ap_count}/{total_ap_count} ]"
+    
+    print(f" {ch_display} ][ Elapsed: {elapsed_seconds} s ][ {timestamp}{filter_status}\n")
 
 def display_access_points():
-    """Display discovered access points"""
+    """Display discovered access points with filter tracking"""
+    global filtered_ap_count, total_ap_count
+    
     print(" BSSID              PWR  Beacons    #Data, #/s  CH   MB   ENC CIPHER  AUTH ESSID\n")
     
     with ap_lock:
+        total_ap_count = len(access_points)
+        
         sorted_aps = sorted(
             access_points.values(),
             key=lambda x: x.power,
             reverse=True
         )
+        
+        filtered_ap_count = len(sorted_aps)
         
         if not sorted_aps:
             print(" No access points detected yet...")
@@ -1083,10 +1123,10 @@ def display_loop(interval=1):
         except KeyboardInterrupt:
             break
 
-def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=None, target_bssid=None):
+def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=None, target_bssid=None, essid_pattern=None):
     """Start packet capture on the specified interface"""
-    global start_time, current_interface, current_channel, output_file, filter_bssid
-
+    global start_time, current_interface, current_channel, output_file
+    global filter_bssid, filter_essid_regex
     global hop_thread, hopping_active
 
     current_interface = interface
@@ -1117,7 +1157,16 @@ def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=
             print("Channel hopper thread started")
         except Exception as e:
             print(f"Failed to start channel hopper: {e}")
-
+    if essid_pattern:
+        try:
+            filter_essid_regex = re.compile(essid_pattern, re.IGNORECASE)
+            print(f"ESSID Filter: Regex pattern '{essid_pattern}'")
+        except re.error as e:
+            print(f"Error: Invalid regex pattern '{essid_pattern}': {e}")
+            sys.exit(1)
+    else:
+        filter_essid_regex = None
+        
     if filter_bssid:
         print(f"Filter: BSSID = {filter_bssid}")
     
@@ -1276,6 +1325,16 @@ def main():
         metavar="FILE",
     )
 
+    parser.add_argument(
+    "-r",
+    "--regex",
+    dest="essid_regex",
+    help="Filter APs by ESSID using regex pattern (e.g., '^Home.*', '.*WiFi$', 'Guest|Public')",
+    metavar="PATTERN",
+    )
+
+    #TODO: Add mutually exclusive group tp prevent using both --bssid and --regex together.
+
     argcomplete.autocomplete(parser)
 
     if len(sys.argv) == 1:
@@ -1303,7 +1362,8 @@ def main():
         args.channel, 
         args.write_pcap,
         args.write_csv,
-        args.bssid
+        args.bssid,
+        args.essid_regex
     )
 
 if __name__ == "__main__":
