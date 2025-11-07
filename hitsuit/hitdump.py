@@ -64,7 +64,26 @@ current_channel = None
 output_file = None
 filter_bssid = None
 
-
+def is_valid_client_mac(mac):
+    """ Check if MAC address is a valid client (not broadcast/multicast) """
+    if not mac:
+        return False
+        
+        #check if the mac is broadcast
+    if mac.lower() == "ff:ff:ff:ff:ff:ff":
+        return False
+    
+        #check if the mac is multicast, (if the LSB of the first byte is odd nbr, it's multicast)
+    try:
+        first_octet = int(mac.split(':')[0], 16)
+        
+        if first_octet & 0x01:
+            return False
+        
+        return True
+    
+    except (ValueError, IndexError):
+        return False
 
 def parse_supported_rates(packet):
     """
@@ -368,8 +387,11 @@ class AccessPoint:
         self.last_seen = datetime.now()
         self.clients = set()
 
-    def update(self, essid=None, channel=None, power=None, mb=None):
+    def update(self, essid=None, channel=None, power=None, mb=None, 
+                crypto=None, cipher=None, auth=None):
+        
         """Update access point information"""
+
         self.last_seen = datetime.now()
         
         if essid and essid != "" and self.essid == "<Hidden>":
@@ -383,6 +405,15 @@ class AccessPoint:
         
         if mb and mb > self.mb:
             self.mb = mb
+        
+        if crypto:
+            self.crypto = crypto
+        
+        if cipher:
+            self.cipher = cipher
+        
+        if auth:
+            self.auth = auth
 
 class Client:
     """Represents a discovered client station"""
@@ -828,8 +859,8 @@ def packet_handler(packet):
                 
                 ap = access_points[bssid]
                 ap.beacons += 1
-                ap.update(essid=essid, channel=channel, power=power, mb=mb_value)
-            
+                ap.update(essid=essid, channel=channel, power=power, mb=mb_value,
+                    crypto=crypto, cipher=cipher, auth=auth)            
             save_packet(packet)
         
         elif packet.haslayer(Dot11ProbeResp):
@@ -864,7 +895,8 @@ def packet_handler(packet):
                     )
                 
                 ap = access_points[bssid]
-                ap.update(essid=essid, channel=channel, power=power, mb=mb_value)
+                ap.update(essid=essid, channel=channel, power=power, mb=mb_value,
+          crypto=crypto, cipher=cipher, auth=auth)  # ✅ ADD THESE
             
             save_packet(packet)
         
@@ -875,6 +907,9 @@ def packet_handler(packet):
             
             client_mac = addr2
             
+            if not is_valid_client_mac(client_mac):
+                return
+    
             probe_essid = ""
             p = packet[Dot11Elt]
             while p:
@@ -896,6 +931,9 @@ def packet_handler(packet):
         elif packet.haslayer(Dot11AssoReq) or packet.haslayer(Dot11ReassoReq):
             client_mac = addr2
             bssid = addr1
+            
+            if not is_valid_client_mac(client_mac):
+                return
             
             if filter_bssid and bssid.lower() != filter_bssid.lower():
                 return
@@ -924,6 +962,9 @@ def packet_handler(packet):
                 client_mac = addr1
                 bssid = addr2
             else:
+                return
+            
+            if not is_valid_client_mac(client_mac):
                 return
             
             if filter_bssid and bssid.lower() != filter_bssid.lower():
