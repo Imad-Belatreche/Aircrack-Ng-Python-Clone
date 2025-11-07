@@ -1135,7 +1135,7 @@ def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=
     output_file = output_file_path
     filter_bssid = target_bssid
     start_time = datetime.now()
-
+    
     print(f"\nStarting hitdump-ng")
     print(f"Interface: {interface}")
     
