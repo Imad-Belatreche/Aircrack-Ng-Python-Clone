@@ -920,8 +920,7 @@ def packet_handler(packet):
                     )
                 
                 ap = access_points[bssid]
-                ap.update(essid=essid, channel=channel, power=power, mb=mb_value,
-          crypto=crypto, cipher=cipher, auth=auth)  # ✅ ADD THESE
+                ap.update(essid=essid, channel=channel, power=power, mb=mb_value, crypto=crypto, cipher=cipher, auth=auth)
             
             save_packet(packet)
         
@@ -1123,7 +1122,7 @@ def display_loop(interval=1):
         except KeyboardInterrupt:
             break
 
-def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=None, target_bssid=None, essid_pattern=None):
+def start_sniffer(interface, channel=None, output_prefix=None, output_formats=None, target_bssid=None, essid_pattern=None):
     """Start packet capture on the specified interface"""
     global start_time, current_interface, current_channel, output_file
     global filter_bssid, filter_essid_regex
@@ -1131,10 +1130,20 @@ def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=
 
     current_interface = interface
     current_channel = channel
-    csv_file = csv_file_path
-    output_file = output_file_path
+    pcap_file = None
+    csv_file = None
     filter_bssid = target_bssid
     start_time = datetime.now()
+    
+    if output_prefix and output_formats:
+        if 'pcap' in output_formats or 'both' in output_formats:
+            pcap_file = f"{output_prefix}.pcap" if not output_prefix.endswith('.pcap') else output_prefix
+        if 'csv' in output_formats or 'both' in output_formats:
+            csv_file = f"{output_prefix}.csv" if not output_prefix.endswith('.csv') else output_prefix
+            if csv_file.endswith('.pcap'):
+                csv_file = csv_file.replace('.pcap', '.csv')
+    
+    output_file = pcap_file
     
     print(f"\nStarting hitdump-ng")
     print(f"Interface: {interface}")
@@ -1157,6 +1166,7 @@ def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=
             print("Channel hopper thread started")
         except Exception as e:
             print(f"Failed to start channel hopper: {e}")
+
     if essid_pattern:
         try:
             filter_essid_regex = re.compile(essid_pattern, re.IGNORECASE)
@@ -1170,8 +1180,8 @@ def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=
     if filter_bssid:
         print(f"Filter: BSSID = {filter_bssid}")
     
-    if output_file:
-        print(f"PCAP Output: {output_file}")
+    if pcap_file:
+        print(f"PCAP Output: {pcap_file}")
     
     if csv_file:
         print(f"CSV Output: {csv_file}")
@@ -1189,9 +1199,9 @@ def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=
     display_thread.start()
 
     csv_thread = None
-    if csv_file_path:
+    if csv_file:
         csv_thread = auto_save_csv(
-            csv_file_path, 
+            csv_file, 
             access_points,
             clients,
             ap_lock, 
@@ -1219,10 +1229,10 @@ def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=
         except Exception:
             pass
         
-        if output_file and captured_packets:
-            print(f"\nWriting {len(captured_packets)} packets to {output_file}...")
+        if pcap_file and captured_packets:
+            print(f"\nWriting {len(captured_packets)} packets to {pcap_file}...")
             try:
-                wrpcap(output_file, captured_packets)
+                wrpcap(pcap_file, captured_packets)
                 print(f"PCAP file saved successfully.")
             except Exception as e:
                 print(f"Failed to write PCAP: {e}")
@@ -1230,7 +1240,7 @@ def start_sniffer(interface, channel=None, output_file_path=None, csv_file_path=
         if csv_file:
             try:
                 print(f"Saving final CSV data...")
-                write_csv(csv_file_path, access_points, clients, ap_lock, client_lock)
+                write_csv(csv_file, access_points, clients, ap_lock, client_lock)
                 print(f"CSV file saved successfully.")
 
             except Exception as e:
@@ -1304,36 +1314,38 @@ def main():
         help="Set interface to specific channel (1-14 for 2.4GHz, 36-165 for 5GHz)",
         metavar="CH",
     )
-
+    
     parser.add_argument(
-        "-wp",
-        "--write-pcap",
-        help="Write captured packets to pcap file",
-        metavar="FILE",
+        "-w",
+        "--write",
+        dest="output_prefix",
+        help="Write both PCAP and CSV output files with the given prefix",
+        metavar="PREFIX",
     )
 
     parser.add_argument(
-        "-b",
+        "--output-format",
+        dest="output_format",
+        nargs=2,
+        metavar=("FORMAT", "PREFIX"),
+        help="Write specific format only: 'pcap' or 'csv' followed by file prefix",
+    )
+
+    filter_group = parser.add_argument_group('filtering options')
+    filter_mutex = filter_group.add_mutually_exclusive_group()
+    
+    filter_mutex.add_argument(
         "--bssid",
-        help="Filter and monitor only the specified BSSID (MAC address)",
+        help="Filter by specific BSSID (MAC address). Only show data for this AP.",
         metavar="MAC",
     )
-    parser.add_argument(
-        "-wv",
-        "--write-csv",
-        help="Write AP and client data to CSV file (airodump-ng format)",
-        metavar="FILE",
+    
+    filter_mutex.add_argument(
+        "--essid",
+        dest="essid_regex",
+        help="Filter APs by ESSID using regex pattern (e.g: '^Home.*', '.*WiFi$', 'Guest|Public')",
+        metavar="PATTERN",
     )
-
-    parser.add_argument(
-    "-r",
-    "--regex",
-    dest="essid_regex",
-    help="Filter APs by ESSID using regex pattern (e.g., '^Home.*', '.*WiFi$', 'Guest|Public')",
-    metavar="PATTERN",
-    )
-
-    #TODO: Add mutually exclusive group tp prevent using both --bssid and --regex together.
 
     argcomplete.autocomplete(parser)
 
@@ -1356,12 +1368,35 @@ def main():
 
     if args.bssid:
         check_mac(args.bssid)
+    
+    if args.output_prefix and args.output_format:
+        print("Error: Cannot use both -w/--write and --output-format together")
+        sys.exit(1)
+    
+    output_prefix = None
+    output_formats = None
+    
+    if args.output_format:
+
+        format_type = args.output_format[0]
+        output_prefix = args.output_format[1]
+        
+        if format_type not in ['pcap', 'csv']:
+            print(f"Error: Invalid format '{format_type}'. Must be 'pcap' or 'csv'")
+            sys.exit(1)
+        
+        output_formats = [format_type]
+    
+    elif args.output_prefix:
+
+        output_prefix = args.output_prefix
+        output_formats = ['both']
 
     start_sniffer(
         args.interface, 
         args.channel, 
-        args.write_pcap,
-        args.write_csv,
+        output_prefix,
+        output_formats,
         args.bssid,
         args.essid_regex
     )

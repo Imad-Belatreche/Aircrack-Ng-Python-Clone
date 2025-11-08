@@ -82,19 +82,19 @@ hitdump is a lightweight Wi-Fi scanning and monitoring tool designed to capture 
 
 ```fish
 hitdump -h
-usage: hitdump [-h] [-c CH] [-wp FILE] [-b MAC] [-wv FILE] [-r PATTERN] interface
+usage: hitdump [-h] [-c CH] [-w PREFIX] [--output-format FORMAT PREFIX] [--bssid MAC | --essid PATTERN] interface
 
-  /$$       /$$   /$$           /$$                                  
+ /$$       /$$   /$$           /$$                                  
 | $$      |__/  | $$          | $$                                  
-| $$$$$$$  /$$ /$$$$$$    /$$$$$$$ /$$   /$$  /$$$$$$  /$$$$$$/$$$$ 
-| $$__  $$| $$|_  $$_/   /$$__  $$| $$  | $$ /$$__  $$| $$_  $$_  $$
-| $$  \ $$| $$  | $$    | $$  | $$| $$  | $$| $$  \ $$| $$ \ $$ \ $$
-| $$  | $$| $$  | $$ /$$| $$  | $$| $$  | $$| $$  | $$| $$ | $$ | $$
-| $$  | $$| $$  |  $$$$/|  $$$$$$$|  $$$$$$/| $$$$$$$/| $$ | $$ | $$
-|__/  |__/|__/   \___/   \_______/ \______/ | $$____/ |__/ |__/ |__/
-                                            | $$                    
-                                            | $$                    
-                                            |__/                        
+| $$$$$$$  /$$ /$$$$$$    /$$$$$$$ /$$   /$$ /$$$$$$/$$$$   /$$$$$$ 
+| $$__  $$| $$|_  $$_/   /$$__  $$| $$  | $$| $$_  $$_  $$ /$$__  $$
+| $$  \ $$| $$  | $$    | $$  | $$| $$  | $$| $$ \ $$ \ $$| $$  \ $$
+| $$  | $$| $$  | $$ /$$| $$  | $$| $$  | $$| $$ | $$ | $$| $$  | $$
+| $$  | $$| $$  |  $$$$/|  $$$$$$$|  $$$$$$/| $$ | $$ | $$| $$$$$$$/
+|__/  |__/|__/   \___/   \_______/ \______/ |__/ |__/ |__/| $$____/ 
+                                                          | $$      
+                                                          | $$      
+                                                          |__/
 
 Capture and display WiFi networks and clients in real-time
 
@@ -104,12 +104,13 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   -c, --channel CH      Set interface to specific channel (1-14 for 2.4GHz, 36-165 for 5GHz)
-  -wp, --write-pcap FILE
-                        Write captured packets to pcap file
-  -b, --bssid MAC       Filter and monitor only the specified BSSID (MAC address)
-  -wv, --write-csv FILE
-                        Write AP and client data to CSV file (airodump-ng format)
-  -r, --regex PATTERN   Filter APs by ESSID using regex pattern (e.g., '^Home.*', '.*WiFi$', 'Guest|Public')
+  -w, --write PREFIX    Write both PCAP and CSV output files with the given prefix
+  --output-format FORMAT PREFIX
+                        Write specific format only: 'pcap' or 'csv' followed by file prefix
+
+filtering options:
+  --bssid MAC           Filter by specific BSSID (MAC address). Only show data for this AP.
+  --essid PATTERN       Filter APs by ESSID using regex pattern (e.g: '^Home.*', '.*WiFi$', 'Guest|Public')
 
 @By NS-Guys
 ```
