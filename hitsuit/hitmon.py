@@ -24,6 +24,7 @@ from helpers import (
     Interface_State,
     add_interface_argument,
     check_monitor,
+    get_phy,
 )
 
 if "_ARGCOMPLETE" not in os.environ:
@@ -63,10 +64,6 @@ FILE_FIELDS = ["name", "new_status", "old_status", "socket"]
 # TODO: Fix the issue where all the vinterfaces got deleted when monitoring on one and attacking on another one
 
 
-def _get_phy(interface):
-    """Get's physical address of given interface (needed for iw command)"""
-    stdout, _ = run_command(f"cat /sys/class/net/{interface}/phy80211/name")
-    return stdout
 
 
 def _get_state(interface):
@@ -310,7 +307,7 @@ def _start_mon(interface: str, channel: int = None):
     if ret == 2 or ret == 1:
         return
 
-    phy = _get_phy(interface)
+    phy = get_phy(interface)
     if not phy:
         print(f"{Fore.RED}Could not determine phy for {interface}{Fore.RESET}")
         return
@@ -372,7 +369,7 @@ def _start_mon(interface: str, channel: int = None):
 
 def _stop_mon(interface: str, verbose=True):
     """This will stop monitor mode, go back to managed mode and re-enable killed processes"""
-    phy = _get_phy(interface)
+    phy = get_phy(interface)
 
     if not phy:
         print(f"{Fore.RED}Couldn't determine phy for {interface}{Fore.RESET}")

@@ -17,8 +17,6 @@ Interface_State = {0: "UP", 1: "DOWN", 2: "UNKNOWN"}
 """
 
 
-
-
 # May be used later to ease user experience
 def _get_mac_address(ip_address):
     """
@@ -30,6 +28,12 @@ def _get_mac_address(ip_address):
         return arp_replay.hwsrc
     else:
         return None
+
+
+def get_phy(interface):
+    """Get's physical address of given interface (needed for iw command)"""
+    stdout, _ = run_command(f"cat /sys/class/net/{interface}/phy80211/name")
+    return stdout
 
 
 # Adds autocompletion of interfaces
@@ -193,7 +197,12 @@ def set_right_channel(interface, bssid):
     )
 
     if not found_channel:
-        channels = list(range(1, 15))
+        phy = get_phy(interface)
+        out, err = run_command(
+            f"iw phy {phy} channels | grep '[[0-9]*]' | awk '{{print $4}}' | tr -d []"
+        )
+        channels = [int(chan) for chan in out.split("\n")]
+        print(channels)
         for channel in channels:
             if channel == init_channel:  # Skip since we already checked
                 continue
