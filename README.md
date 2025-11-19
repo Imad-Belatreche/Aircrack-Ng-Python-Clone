@@ -1,6 +1,6 @@
 # Aircrack-Ng-Python-Clone
 
-A simple yet effective clone of the known wireless network security tool Aircrack-Ng, built using Python.
+A simple yet effective set of wireless network penetration testing tools built using Python.
 
 ## Main tools
 
