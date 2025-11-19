@@ -64,8 +64,6 @@ FILE_FIELDS = ["name", "new_status", "old_status", "socket"]
 # TODO: Fix the issue where all the vinterfaces got deleted when monitoring on one and attacking on another one
 
 
-
-
 def _get_state(interface):
     out, err = run_command(
         f"ip link show {interface} | awk '/state/ {{for (i=0;i<=NF;i++) if ($i == \"state\") print $(i+1)}}'"
@@ -86,13 +84,19 @@ def _get_channel(interface):
         out, err = run_command(
             f"iw dev {interface} info | grep channel | awk '{{print $2}}'"
         )
-        channel = int(str(out))
+        if out:
+            channel = int(str(out))
+        else:
+            channel = 6
+
         if err:
             print(
                 f"{Fore.RED}Wasn't able to get the interface channel ! (Defaulting to 6)"
             )
             channel = 6
-    except Exception:
+
+    except Exception as e:
+        print(f"{Fore.RED}Error getting the channel: {e}")
         channel = 6
     return channel
 
@@ -318,7 +322,7 @@ def _start_mon(interface: str, channel: int = None):
 
     print(f"Starting monitor mode on {interface} [{phy}]")
     int_state = _get_state(interface)
-    if int_state == Interface_State[0]:
+    if int_state in (Interface_State[0], Interface_State[2]):
         _, err = run_command(f"ip link set {interface} down")
         if err:
             print(f"{Fore.RED}Couldn't set interface link to down: {err}{Fore.RESET}")
