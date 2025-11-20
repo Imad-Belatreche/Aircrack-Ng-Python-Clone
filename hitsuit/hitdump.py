@@ -833,6 +833,8 @@ def packet_handler(packet):
         if not packet.haslayer(Dot11):
             return
         
+        save_packet(packet)
+
         power = get_rssi(packet)
         sequence = get_sequence_number(packet)
 
@@ -883,7 +885,7 @@ def packet_handler(packet):
                 ap.beacons += 1
                 ap.update(essid=essid, channel=channel, power=power, mb=mb_value,
                     crypto=crypto, cipher=cipher, auth=auth)            
-            save_packet(packet)
+            
         
         elif packet.haslayer(Dot11ProbeResp):
             bssid = addr3 or addr2
@@ -921,9 +923,7 @@ def packet_handler(packet):
                 
                 ap = access_points[bssid]
                 ap.update(essid=essid, channel=channel, power=power, mb=mb_value, crypto=crypto, cipher=cipher, auth=auth)
-            
-            save_packet(packet)
-        
+                    
         elif packet.haslayer(Dot11ProbeReq):
 
             if filter_bssid:
@@ -949,9 +949,7 @@ def packet_handler(packet):
                     clients[client_mac] = Client(client_mac)
                 
                 clients[client_mac].update(power=power, probe=probe_essid)
-            
-            save_packet(packet)
-        
+                    
         elif packet.haslayer(Dot11AssoReq) or packet.haslayer(Dot11ReassoReq):
             client_mac = addr2
             bssid = addr1
@@ -971,9 +969,7 @@ def packet_handler(packet):
             with ap_lock:
                 if bssid in access_points:
                     access_points[bssid].clients.add(client_mac)
-            
-            save_packet(packet)
-        
+                    
         elif dot11.type == 2:
             
             to_ds = (dot11.FCfield & 0x1) != 0
@@ -1011,8 +1007,6 @@ def packet_handler(packet):
                     if not retry:
                         clients[client_mac].window_frames += 1
             
-            save_packet(packet)
-
     except Exception as e:
         pass
 
