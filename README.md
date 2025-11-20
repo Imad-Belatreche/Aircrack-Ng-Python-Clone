@@ -174,7 +174,6 @@ hitgraph carp -i capture.csv --min-power -70
 - **CARP** - Client-AP Relationship: Shows which clients connect to which access points with signal strength colors
 - **CPG** - Common Probe Graph: Identifies clients probing for the same networks (useful for tracking)
 - **CAIG** - Complete Interaction Graph: Shows all relationships including unassociated clients and probe requests
-- **All** - Generates all three graph types in one command
 
 #### Options
 
