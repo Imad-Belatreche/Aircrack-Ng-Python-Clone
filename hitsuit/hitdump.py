@@ -12,6 +12,7 @@ import argcomplete
 from datetime import datetime
 from pathlib import Path
 from scapy.all import Dot11Beacon, Dot11Elt, Dot11EltRSN, Dot11EltVendorSpecific
+from hitdump_tui import HitDumpApp
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -62,8 +63,10 @@ hop_thread = None
 current_interface = None
 current_channel = None
 output_file = None
+csv_file = None
 filter_bssid = None
 filter_essid_regex = None
+HELP_TEXT = ""
 
 filtered_ap_count = 0
 total_ap_count = 0
@@ -1010,122 +1013,16 @@ def packet_handler(packet):
     except Exception as e:
         pass
 
-def display_interface(interface, channel):
-    """Display header information with filter status"""
-    global start_time, packet_count, filter_bssid, filter_essid_regex
-    global filtered_ap_count, total_ap_count
-    
-    elapsed = datetime.now() - start_time
-    elapsed_seconds = int(elapsed.total_seconds())
-    
-    if channel:
-        ch_display = f"CH {channel:>2}"
-    else:
-        ch_display = "CH  -"
-    
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
-    
-    filter_status = ""
-    if filter_bssid:
-        filter_status = f" [ FILTER: BSSID={filter_bssid.upper()} ]"
-    elif filter_essid_regex:
-        filter_status = f" [ FILTER: ESSID='{filter_essid_regex.pattern}' ]"
-        if total_ap_count > 0:
-            filter_status += f" [ APs: {filtered_ap_count}/{total_ap_count} ]"
-    
-    print(f" {ch_display} ][ Elapsed: {elapsed_seconds} s ][ {timestamp}{filter_status}\n")
-
-def display_access_points():
-    """Display discovered access points with filter tracking"""
-    global filtered_ap_count, total_ap_count
-    
-    print(" BSSID              PWR  Beacons    #Data, #/s  CH   MB   ENC CIPHER  AUTH ESSID\n")
-    
-    with ap_lock:
-        total_ap_count = len(access_points)
-        
-        sorted_aps = sorted(
-            access_points.values(),
-            key=lambda x: x.power,
-            reverse=True
-        )
-        
-        filtered_ap_count = len(sorted_aps)
-        
-        if not sorted_aps:
-            print(" No access points detected yet...")
-        
-        for ap in sorted_aps:
-
-            ch_str = str(ap.channel) if ap.channel != -1 else "-"
-            essid = ap.essid[:20] if len(ap.essid) <= 20 else ap.essid[:17] + "..."
-            data_rate = ap.current_data_rate
-            max_bitrate = ap.mb
-            
-            print(f" {ap.bssid.upper():17s}  {ap.power:>3d}  {ap.beacons:>7d}    {ap.data_packets:>5d} {data_rate:>4d}  {ch_str:>2s}  {max_bitrate:>3}   {ap.crypto:4s} {ap.cipher:6s}  {ap.auth:4s} {essid}")
-
-def display_clients():
-    """Display discovered clients"""
-    print("\n BSSID              STATION            PWR    Rate    Lost   Frames  Notes  Probes\n")
-    
-    with client_lock:
-        sorted_clients = sorted(
-            clients.values(),
-            key=lambda x: x.packets,
-            reverse=True
-        )[:30]
-        
-        if not sorted_clients:
-            print(" No stations detected yet...")
-        
-        for client in sorted_clients:
-            #TODO: implement the rate display method, currently just a placeholder 
-            rate_display = "0 - 0"
-            lost = client.window_lost
-
-            probes_list = list(client.probes)[:2]
-            probes_str = ", ".join(probes_list) if probes_list else ""
-            if len(probes_str) > 20:
-                probes_str = probes_str[:17] + "..."
-            
-            bssid_display = client.bssid.upper() if client.bssid != "(not associated)" else "(not associated)"
-            
-            print(f" {bssid_display:17s}  {client.mac.upper():17s}  {client.power:>3d}    {rate_display:7s}  {lost:>5d}   {client.packets:>6d}         {probes_str}")
-
-def display_stats():
-    """Display all statistics"""
-    sys.stdout.write("\033[H\033[J")
-    sys.stdout.flush()
-
-    data_rate_update()
-
-    display_interface(current_interface, current_channel)
-    
-    display_access_points()
-
-    display_clients()
-    
-
-
-def display_loop(interval=1):
-    """Continuously update the display"""
-    while True:
-        try:
-            display_stats()
-            time.sleep(interval)
-        except KeyboardInterrupt:
-            break
-
 def start_sniffer(interface, channel=None, output_prefix=None, output_formats=None, target_bssid=None, essid_pattern=None):
     """Start packet capture on the specified interface"""
-    global start_time, current_interface, current_channel, output_file
+    global start_time, current_interface, current_channel, output_file, csv_file
     global filter_bssid, filter_essid_regex
     global hop_thread, hopping_active
 
     current_interface = interface
     current_channel = channel
     pcap_file = None
-    csv_file = None
+    local_csv_file = None
     filter_bssid = target_bssid
     start_time = datetime.now()
     
@@ -1133,11 +1030,12 @@ def start_sniffer(interface, channel=None, output_prefix=None, output_formats=No
         if 'pcap' in output_formats or 'both' in output_formats:
             pcap_file = f"{output_prefix}.pcap" if not output_prefix.endswith('.pcap') else output_prefix
         if 'csv' in output_formats or 'both' in output_formats:
-            csv_file = f"{output_prefix}.csv" if not output_prefix.endswith('.csv') else output_prefix
-            if csv_file.endswith('.pcap'):
-                csv_file = csv_file.replace('.pcap', '.csv')
+            local_csv_file = f"{output_prefix}.csv" if not output_prefix.endswith('.csv') else output_prefix
+            if local_csv_file.endswith('.pcap'):
+                local_csv_file = local_csv_file.replace('.pcap', '.csv')
     
     output_file = pcap_file
+    csv_file = local_csv_file
     
     print(f"\nStarting hitdump-ng")
     print(f"Interface: {interface}")
@@ -1174,8 +1072,8 @@ def start_sniffer(interface, channel=None, output_prefix=None, output_formats=No
     if filter_bssid:
         print(f"Filter: BSSID = {filter_bssid}")
     
-    if pcap_file:
-        print(f"PCAP Output: {pcap_file}")
+    if output_file:
+        print(f"PCAP Output: {output_file}")
     
     if csv_file:
         print(f"CSV Output: {csv_file}")
@@ -1189,8 +1087,8 @@ def start_sniffer(interface, channel=None, output_prefix=None, output_formats=No
     window_stats_thread = threading.Thread(target=update_window_stats, args=(5,), daemon=True)
     window_stats_thread.start()
 
-    display_thread = threading.Thread(target=display_loop, daemon=True)
-    display_thread.start()
+    # display_thread = threading.Thread(target=display_loop, daemon=True)
+    # display_thread.start()
 
     csv_thread = None
     if csv_file:
@@ -1204,12 +1102,17 @@ def start_sniffer(interface, channel=None, output_prefix=None, output_formats=No
         )
         print(f"CSV auto-save enabled (every 30 seconds)")
 
+    # Start sniffer in a thread so TUI can run in main thread
+    sniffer_thread = threading.Thread(
+        target=lambda: sniff(iface=interface, prn=packet_handler, store=False),
+        daemon=True
+    )
+    sniffer_thread.start()
+
     try:
-        sniff(
-            iface=interface,
-            prn=packet_handler,
-            store=False
-        )
+        import sys
+        app = HitDumpApp(sys.modules[__name__])
+        app.run()
     except KeyboardInterrupt:
         print(f"\nStopping capture...")
     except Exception as e:
@@ -1279,6 +1182,7 @@ def _check_monitor_mode(interface):
 
 def main():
     """Main function"""
+    global HELP_TEXT
     art = r"""
  /$$       /$$   /$$           /$$                                  
 | $$      |__/  | $$          | $$                                  
@@ -1340,6 +1244,8 @@ def main():
         help="Filter APs by ESSID using regex pattern (e.g: '^Home.*', '.*WiFi$', 'Guest|Public')",
         metavar="PATTERN",
     )
+
+    HELP_TEXT = parser.format_help()
 
     argcomplete.autocomplete(parser)
 
