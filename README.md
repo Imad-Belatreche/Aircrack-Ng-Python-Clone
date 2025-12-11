@@ -115,6 +115,37 @@ filtering options:
 @By NS-Guys
 ```
 
+
+### Hitcrack
+
+hitcrack is a WPA/WPA2 password cracking tool that extracts 4-way handshakes from capture files and performs dictionary-based attacks to recover wireless passwords.
+
+```fish
+hitcrack -h
+usage: hitcrack [-h] -c FILE -w FILE -b BSSID [-o FILE] [-p MODE]
+
+   /$$       /$$   /$$                                            /$$      
+| $$      |__/  | $$                                           | $$      
+| $$$$$$$  /$$ /$$$$$$    /$$$$$$$  /$$$$$$  /$$$$$$   /$$$$$$$| $$   /$$
+| $$__  $$| $$|_  $$_/   /$$_____/ /$$__  $$|____  $$ /$$_____/| $$  /$$/
+| $$  \ $$| $$  | $$    | $$      | $$  \__/ /$$$$$$$| $$      | $$$$$$/ 
+| $$  | $$| $$  | $$ /$$| $$      | $$      /$$__  $$| $$      | $$_  $$ 
+| $$  | $$| $$  |  $$$$/|  $$$$$$$| $$     |  $$$$$$$|  $$$$$$$| $$ \  $$
+|__/  |__/|__/   \___/   \_______/|__/      \_______/ \_______/|__/  \__/
+
+Capture and analyze WiFi handshakes for WPA/WPA2 cracking
+
+options:
+  -h, --help            show this help message and exit
+  -c, --capture FILE    Path to .cap file containing handshake
+  -w, --wordlist FILE   Path to wordlist file
+  -b, --bssid BSSID     Target BSSID (e.g., AA:BB:CC:DD:EE:FF)
+  -o, --output FILE     Save handshake packets to .cap file for later use
+  -p, --processes MODE  Use 0 for max CPU cores (parallel), or 1 for single-process (default)
+
+@By NS-Guys
+```
+
 ## Instalation
 
 Simple and easy, the installation script will do everything needed:
