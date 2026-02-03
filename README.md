@@ -150,41 +150,6 @@ options:
 @By NS-Guys
 ```
 
-#### Usage Examples
-
-```bash
-# Generate CARP graph (Client-AP connections)
-hitgraph carp -i capture.csv
-
-# Generate CPG graph (Common probes with min 1 client)
-hitgraph cpg -i capture.csv --min-clients 1
-
-# Generate CAIG graph (Complete interactions)
-hitgraph caig -i capture.csv
-
-# Generate all graphs
-hitgraph all -i capture.csv -o ./network_analysis
-
-# Filter by signal strength
-hitgraph carp -i capture.csv --min-power -70
-```
-
-#### Graph Types
-
-- **CARP** - Client-AP Relationship: Shows which clients connect to which access points with signal strength colors
-- **CPG** - Common Probe Graph: Identifies clients probing for the same networks (useful for tracking)
-- **CAIG** - Complete Interaction Graph: Shows all relationships including unassociated clients and probe requests
-
-#### Options
-
-```
--i, --input FILE        Input CSV file from hitdump-ng (required)
--o, --output-dir DIR    Output directory for PNG graphs (default: current directory)
---min-power LEVEL       Minimum signal strength in dBm (default: -100)
---min-clients NUM       Minimum clients per probe in CPG (default: 2)
---no-encryption         Hide encryption type from CARP labels
-```
-
 ## Installation
 
 Simple and easy, the installation script will do everything needed:
