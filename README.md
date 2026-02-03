@@ -115,6 +115,37 @@ filtering options:
 @By NS-Guys
 ```
 
+### Hitgraph
+
+WiFi network visualization tool that generates graphs from hitdump-ng CSV output. Creates three types of network relationship diagrams with signal strength analysis and client tracking detection.
+
+```fish
+hitgraph -h
+usage: hitgraph [-h] {carp,cpg,caig,all} ...
+
+     /$$       /$$   /$$                                            /$$      
+    | $$      |__/  | $$                                           | $$      
+    | $$$$$$$  /$$ /$$$$$$    /$$$$$$   /$$$$$$  /$$$$$$   /$$$$$$ | $$$$$$$ 
+    | $$__  $$| $$|_  $$_/   /$$__  $$ /$$__  $$|____  $$ /$$__  $$| $$__  $$
+    | $$  \ $$| $$  | $$    | $$  \ $$| $$  \__/ /$$$$$$$| $$  \ $$| $$  \ $$
+    | $$  | $$| $$  | $$ /$$| $$  | $$| $$      /$$__  $$| $$  | $$| $$  | $$
+    | $$  | $$| $$  |  $$$$/|  $$$$$$$| $$     |  $$$$$$$| $$$$$$$/| $$  | $$
+    |__/  |__/|__/   \___/   \____  $$|__/      \_______/| $$____/ |__/  |__/
+                             /$$  \ $$                   | $$                
+                            |  $$$$$$/                   | $$                
+                             \______/                    |__/                
+
+WiFi Network Visualization Tool
+
+positional arguments:
+  {carp,cpg,caig,all}
+    carp                Client-AP Relationship graph
+    cpg                 Common Probe Graph
+    caig                Complete Interaction Graph
+    all                 Generate all graph types
+
+options:
+  -h, --help            show this help message and exit
 
 ### Hitcrack
 
@@ -146,7 +177,7 @@ options:
 @By NS-Guys
 ```
 
-## Instalation
+## Installation
 
 Simple and easy, the installation script will do everything needed:
 
@@ -168,6 +199,7 @@ sudo ./uninstall.sh
 
 - For parsing command arguments: **argparse**
 - For terminal tab autocompletion: **argcomplete**
-- For excuting system commands: **subprocess** and **os**
+- For executing system commands: **subprocess** and **os**
 - For text colors: **colorama**
-- For crafting and editing farmes and packets: **scapy**
+- For crafting and editing frames and packets: **scapy**
+- For network graph visualization: **graphviz**
