@@ -1,4 +1,8 @@
 argparse
 argcomplete
 colorama
+graphviz
+regex
+rich
 scapy
+textual
